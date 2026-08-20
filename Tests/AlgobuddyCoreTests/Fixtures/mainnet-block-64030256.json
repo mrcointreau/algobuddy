@@ -1,0 +1,35 @@
+{
+  "block": {
+    "bi": 8345131,
+    "earn": 218288,
+    "fc": 60000,
+    "fees": "Y76M3MSY6DKBRHBL7C3NNDXGS5IIMQVQVUAB6MP4XEMMGVF2QWNPL226CA",
+    "frac": 6886250026,
+    "gen": "mainnet-v1.0",
+    "gh": "wGHE2Pwdvd7S12BL5FaOP20EGYesN73ktiC1qzkkit8=",
+    "nextbefore": 64030648,
+    "nextproto": "https://github.com/algorandfoundation/specs/tree/268b63433a907455d439995bf916f6b296018f4f",
+    "nextswitch": 64238648,
+    "nextyes": 4284,
+    "pp": 8375131,
+    "prev": "blk-TNYGYXJV4SMJVR5BXNCGQUUFMQR4EINBR2JNMPXRUZYG7QXUAPSQ",
+    "prev512": "9jw2xGEowmmwxjnaLCPjs9ytzx3LsxNgTAIQqngCqKgm0CKkL+NP82J6+06uJPMnTIRL7bepeET2Q77PHyriqg==",
+    "proto": "https://github.com/algorandfoundation/specs/tree/953304de35264fc3ef91bcd05c123242015eeaed",
+    "prp": "3XBSYFKN4BT5HYBJ7V6VVJUYHYUVD5P7CAR77ZMCJSCK4LHLZLHDLYN2WQ",
+    "rnd": 64030256,
+    "rwcalr": 64500000,
+    "rwd": "737777777777777777777777777777777777777777777777777UFEJ2CI",
+    "seed": "A0jRA550u9UuKcFC3j+kjJujVHuXN9iObjOnpjsdyO0=",
+    "spt": {
+      "0": {
+        "n": 64030208
+      }
+    },
+    "tc": 3672782260,
+    "ts": 1786627672,
+    "txn": "xUyG1Iw3zcfkZardFLivSw+CgPfmUbUEQpIfjniEG0k=",
+    "txn256": "X5d+/MeSLhxiTqV8JJ8RkWa7OThII93ZxzzJ4N5+DCo=",
+    "txn512": "VCKZIzVM9RDtu7vrNK5omDzRTlM4HIfQGGQgOkWW9nwO53EKXwOTYG1EwhWmG9d+lVbW9JUjo9jbB0FBn+AgQw==",
+    "upgradeyes": true
+  }
+}

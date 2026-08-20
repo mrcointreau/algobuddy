@@ -1,0 +1,41 @@
+#!/bin/sh
+# Conventional Commits gate: <type>(<scope>)!: <description>
+#
+# The changelog and the version bump decision are derived from commit subjects,
+# so a malformed subject is caught here, at write time, rather than surfacing as
+# a hole in the release notes months later. CI runs this same script over every
+# pull request commit and over the head of a direct push, so bypassing it
+# locally (git commit --no-verify) only defers the failure.
+#
+# Enable with: make hooks
+
+msg_file="$1"
+subject=$(head -n 1 "$msg_file")
+
+# Subjects git generates itself, and autosquash prefixes, pass untouched.
+case "$subject" in
+    Merge\ * | Revert\ * | fixup!\ * | squash!\ *) exit 0 ;;
+esac
+
+types='feat|fix|docs|refactor|perf|test|build|ci|chore|revert'
+if ! printf '%s' "$subject" | grep -qE "^($types)(\([a-z0-9./-]+\))?!?: [^ ]"; then
+    cat >&2 <<EOF
+Commit subject does not follow Conventional Commits:
+
+    $subject
+
+Expected:  <type>(<scope>)!: <description>
+Types:     feat fix docs refactor perf test build ci chore revert
+Examples:  feat: hide values from the menu bar
+           fix(poller): retry the challenge seed when a header omits it
+           feat!: drop macOS 14 support
+
+The scope is optional; "!" marks a breaking change. See CONTRIBUTING.md.
+EOF
+    exit 1
+fi
+
+if [ ${#subject} -gt 72 ]; then
+    echo "Commit subject is ${#subject} characters; keep it at 72 or fewer." >&2
+    exit 1
+fi

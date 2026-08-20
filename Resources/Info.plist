@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleName</key>
+	<string>algobuddy</string>
+	<key>CFBundleDisplayName</key>
+	<string>algobuddy</string>
+	<key>CFBundleIdentifier</key>
+	<string>dev.algobuddy.app</string>
+	<key>CFBundleExecutable</key>
+	<string>algobuddy</string>
+	<key>CFBundleIconFile</key>
+	<string>algobuddy</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<!-- CFBundleShortVersionString and CFBundleVersion are absent on purpose:
+	     `make bundle` stamps them from the git tag and commit count, so the tag
+	     stays the single source of truth with no hardcoded value to drift. -->
+	<key>LSMinimumSystemVersion</key>
+	<string>14.0</string>
+	<!-- Menu bar agent: no Dock icon, no main window. -->
+	<key>LSUIElement</key>
+	<true/>
+	<!-- The chain data source URLs are user-configured, and a self-hosted algod
+	     serves plain http. Without this, App Transport Security cancels every
+	     cleartext request to a LAN or tailnet hostname before it is sent, breaking
+	     the documented "point it at your own node" setup. The default endpoints
+	     stay https; this only stops the OS from vetoing what the user typed. -->
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsArbitraryLoads</key>
+		<true/>
+	</dict>
+	<key>NSHumanReadableCopyright</key>
+	<string>MIT licensed.</string>
+</dict>
+</plist>

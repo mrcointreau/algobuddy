@@ -1,0 +1,49 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  # Runs the repo's own commit-msg hook over each commit, so the local gate and
+  # CI can never disagree about what a valid subject is. On a pull request every
+  # commit in the branch is checked; on a direct push, the head commit (amended
+  # history makes older push ranges unresolvable).
+  commits:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Validate commit messages
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = "pull_request" ]; then
+            commits=$(git rev-list ${{ github.event.pull_request.base.sha }}..${{ github.event.pull_request.head.sha }})
+          else
+            commits=$(git rev-list -1 HEAD)
+          fi
+          for sha in $commits; do
+            git log -1 --format=%B "$sha" > /tmp/message
+            echo "checking $(git log -1 --format=%h "$sha"): $(git log -1 --format=%s "$sha")"
+            sh .githooks/commit-msg /tmp/message
+          done
+
+  check:
+    # macOS 15 images ship Xcode 16, which is what Package.swift's
+    # swift-tools-version 6.0 and the Swift Testing framework require.
+    runs-on: macos-15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Logged rather than assumed: a toolchain older than Swift 6 fails in
+      # ways that look like source errors.
+      - name: Toolchain
+        run: swift --version
+
+      # lint + build + test. No certificates needed: only release signing would
+      # require them, and releases are built from source on the user's machine.
+      - name: Check
+        run: make check

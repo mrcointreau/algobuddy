@@ -1,0 +1,32 @@
+name: Release
+
+# Maintains the release pull request and publishes the release when it merges.
+# After each releasable commit on main, release-please opens or updates a PR
+# carrying the CHANGELOG additions and the version computed from the
+# Conventional Commit types since the last release. Merging that PR is the
+# whole release act: release-please creates the tag and the GitHub Release,
+# with the PR's notes as the release body, and closes out its own labels. The
+# config's go release type is the strategy that maintains only the changelog:
+# the Makefile stamps the version from the tag at build time, so no committed
+# file needs a version bump.
+#
+# Runs as the GitHub App bot: pull requests created by the default workflow
+# token would not trigger CI, and an untested release PR defeats the point.
+on:
+  push:
+    branches: [main]
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Mint bot token
+        id: bot
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.BOT_ID }}
+          private-key: ${{ secrets.BOT_SK }}
+
+      - uses: googleapis/release-please-action@v4
+        with:
+          token: ${{ steps.bot.outputs.token }}

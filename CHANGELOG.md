@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.0](https://github.com/mrcointreau/algobuddy/compare/v1.0.1...v1.1.0) (2026-08-21)
+
+
+### Features
+
+* **settings:** add a manual check for updates ([#8](https://github.com/mrcointreau/algobuddy/issues/8)) ([5ccf532](https://github.com/mrcointreau/algobuddy/commit/5ccf532596be7bafa6199292dd327b1493de612c))
+
 ## [1.0.1](https://github.com/mrcointreau/algobuddy/compare/v1.0.0...v1.0.1) (2026-08-21)
 
 

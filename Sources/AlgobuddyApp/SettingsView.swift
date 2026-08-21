@@ -114,15 +114,7 @@ struct SettingsView: View {
                 .toggleStyle(.checkbox)
             }
 
-            // The stamped build identity, so a bug report can name the exact
-            // build: a version number on releases, a commit hash on development
-            // builds. Absent under `swift run`, where no bundle exists.
-            if let version = model.appVersion {
-                Text("algobuddy \(version)")
-                    .font(Typography.secondary)
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .center)
-            }
+            VersionFooter(model: model)
         }
         // Leaving a field commits it, the same contract as AddressField: an
         // edit abandoned by clicking elsewhere must not sit in the bound text
@@ -139,6 +131,80 @@ struct SettingsView: View {
         // exactly, so there is nothing left to scroll.
         .fixedSize(horizontal: false, vertical: true)
         .frame(width: 480)
+    }
+}
+
+/// The stamped build identity and a manual update check.
+///
+/// The app is installed by building from source, so nobody learns that a newer
+/// release exists unless they revisit the repository. The check is manual and
+/// says so: one request, when the button is clicked, and never otherwise.
+struct VersionFooter: View {
+    @Bindable var model: AppModel
+
+    var body: some View {
+        VStack(spacing: 6) {
+            // A version number on releases, a commit hash on development
+            // builds, so a bug report can name the exact build. Absent under
+            // `swift run`, where no bundle exists; the check still works there
+            // and reports that it cannot compare.
+            if let version = model.appVersion {
+                Text("algobuddy \(version)")
+                    .font(Typography.secondary)
+                    .foregroundStyle(.secondary)
+            }
+
+            HStack(spacing: 8) {
+                Button("Check for Updates") { model.checkForUpdates() }
+                    .disabled(model.isCheckingForUpdates)
+                if model.isCheckingForUpdates {
+                    Text("Checking…").font(Typography.secondary).foregroundStyle(.secondary)
+                } else if let status = model.updateStatus {
+                    UpdateResult(status: status)
+                }
+            }
+
+            // The same disclosure the chain data source section makes: the one
+            // place this pane reaches a host the user did not configure.
+            Text("Checking contacts github.com, and only when you click.")
+                .font(Typography.secondary)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, alignment: .center)
+    }
+}
+
+/// One line of text beside the button. Never an alert and never a
+/// notification: the user asked a question and is standing right here for the
+/// answer.
+private struct UpdateResult: View {
+    let status: UpdateStatus
+
+    var body: some View {
+        switch status {
+        case .upToDate:
+            Text("Up to date.")
+                .font(Typography.secondary).foregroundStyle(.secondary)
+        case .updateAvailable(let version, let url):
+            // The link opens the release page in the browser. Downloading and
+            // installing stays a deliberate `git pull && make install`, which
+            // is what keeps the app something that never fetches code.
+            HStack(spacing: 4) {
+                Text("Version").font(Typography.secondary).foregroundStyle(.secondary)
+                Link(version, destination: url).font(Typography.secondary)
+                Text("is available.").font(Typography.secondary).foregroundStyle(.secondary)
+            }
+        case .cannotCompare(let latest, let url):
+            // Never "up to date" without evidence: this build carries no
+            // version to compare, so the latest release is named and the user
+            // decides.
+            HStack(spacing: 4) {
+                Text("Latest release is").font(Typography.secondary).foregroundStyle(.secondary)
+                Link(latest, destination: url).font(Typography.secondary)
+            }
+        case .failed(let message):
+            Text(message).font(Typography.secondary).foregroundStyle(.secondary)
+        }
     }
 }
 

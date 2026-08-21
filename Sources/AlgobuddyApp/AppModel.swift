@@ -575,6 +575,33 @@ final class AppModel {
     let appVersion: String? =
         Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
 
+    // MARK: - Update check
+
+    /// The result of the last check this launch, or nil before one is asked
+    /// for. Deliberately not persisted: a stale answer from yesterday would be
+    /// presented with the same confidence as one from a second ago.
+    private(set) var updateStatus: UpdateStatus?
+    private(set) var isCheckingForUpdates = false
+    private let updateChecker = UpdateChecker()
+
+    /// Contacts github.com, and only from here. The app is installed by
+    /// building from source, so a new release is otherwise invisible to anyone
+    /// who does not revisit the repository. Nothing is downloaded and nothing
+    /// is run: the answer is a version number and a link.
+    func checkForUpdates() {
+        guard !isCheckingForUpdates else { return }
+        isCheckingForUpdates = true
+        // Cleared first, so the previous answer cannot sit next to a spinner
+        // looking like the current one.
+        updateStatus = nil
+        Task { [appVersion, updateChecker] in
+            let status = await updateChecker.check(runningVersion: appVersion)
+            updateStatus = status
+            isCheckingForUpdates = false
+            log.info("update check: \(String(describing: status))")
+        }
+    }
+
     /// Both notification posting and login-item registration need a real bundle
     /// identity, which a bare binary under `swift run` lacks. One predicate, so
     /// the two features can never disagree about what counts as bundled.

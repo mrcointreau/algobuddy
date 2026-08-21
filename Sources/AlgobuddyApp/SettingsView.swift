@@ -158,7 +158,15 @@ struct VersionFooter: View {
                 Button("Check for Updates") { model.checkForUpdates() }
                     .disabled(model.isCheckingForUpdates)
                 if model.isCheckingForUpdates {
-                    Text("Checking…").font(Typography.secondary).foregroundStyle(.secondary)
+                    // A spinner beside the control it belongs to, and unlabelled:
+                    // on macOS the indicator itself says that work is in flight,
+                    // and a word next to it repeats what the dimmed button has
+                    // already said. The accessibility label is not shown, and
+                    // exists because a bare indicator otherwise announces
+                    // nothing about what is being waited on.
+                    ProgressView()
+                        .controlSize(.small)
+                        .accessibilityLabel("Checking for updates.")
                 } else if let status = model.updateStatus {
                     UpdateResult(status: status)
                 }
@@ -166,7 +174,7 @@ struct VersionFooter: View {
 
             // The same disclosure the chain data source section makes: the one
             // place this pane reaches a host the user did not configure.
-            Text("Checking contacts github.com, and only when you click.")
+            Text("The check contacts github.com, and only when you click.")
                 .font(Typography.secondary)
                 .foregroundStyle(.secondary)
         }
@@ -189,21 +197,53 @@ private struct UpdateResult: View {
             // The link opens the release page in the browser. Downloading and
             // installing stays a deliberate `git pull && make install`, which
             // is what keeps the app something that never fetches code.
-            HStack(spacing: 4) {
-                Text("Version").font(Typography.secondary).foregroundStyle(.secondary)
-                Link(version, destination: url).font(Typography.secondary)
-                Text("is available.").font(Typography.secondary).foregroundStyle(.secondary)
-            }
+            LinkedResult(
+                leading: "Version", linkTitle: version, trailing: "is available.", url: url,
+                spoken: "Version \(version) is available.")
         case .cannotCompare(let latest, let url):
             // Never "up to date" without evidence: this build carries no
             // version to compare, so the latest release is named and the user
             // decides.
-            HStack(spacing: 4) {
-                Text("Latest release is").font(Typography.secondary).foregroundStyle(.secondary)
-                Link(latest, destination: url).font(Typography.secondary)
-            }
+            LinkedResult(
+                leading: "Latest release is", linkTitle: latest, url: url,
+                spoken: "Latest release is \(latest).")
         case .failed(let message):
-            Text(message).font(Typography.secondary).foregroundStyle(.secondary)
+            // Red, the same convention the login item error uses, so this pane
+            // marks a failure one way. The message is a whole sentence and
+            // carries the outcome by itself, because a colour is not readable
+            // to everyone and is not a message.
+            Text(message).font(Typography.secondary).foregroundStyle(.red)
+        }
+    }
+}
+
+/// A result line built around the release link.
+///
+/// VoiceOver treats a row of text views as separate elements, so the line is
+/// otherwise read out as fragments. The words around the link are hidden from
+/// it and the sentence they form becomes the link's own label, which leaves one
+/// element that reads the whole line and can still be focused and opened.
+private struct LinkedResult: View {
+    let leading: String
+    let linkTitle: String
+    var trailing: String?
+    let url: URL
+    /// The line as one sentence, for VoiceOver.
+    let spoken: String
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Text(leading)
+                .font(Typography.secondary).foregroundStyle(.secondary)
+                .accessibilityHidden(true)
+            Link(linkTitle, destination: url)
+                .font(Typography.secondary)
+                .accessibilityLabel(spoken)
+            if let trailing {
+                Text(trailing)
+                    .font(Typography.secondary).foregroundStyle(.secondary)
+                    .accessibilityHidden(true)
+            }
         }
     }
 }

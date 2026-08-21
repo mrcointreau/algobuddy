@@ -9,8 +9,9 @@ name: Claude
 #   - Runs on macOS, so it builds and tests the real app (`make check`) rather
 #     than proposing changes it cannot compile.
 #   - Triggers only for collaborators with write access (the action enforces
-#     this), so anonymous issue text can never drive it. On a public repo that
-#     closes the prompt-injection path that the 2026 CI-agent incidents used.
+#     this), so anonymous issue text can never drive it. On a public repo an
+#     agent that obeys strangers is a prompt-injection target; this one cannot
+#     hear them.
 #   - Authenticated by CLAUDE_CODE_OAUTH_TOKEN, a subscription token generated
 #     with `claude setup-token`. Treat that secret as an account credential.
 #
@@ -34,17 +35,19 @@ concurrency:
 
 jobs:
   claude:
-    # Only spin up a runner when actually summoned. The action additionally
-    # rejects anyone without write access, so in practice this is owner-only.
+    # Only spin up a runner when actually summoned. This guard just saves the
+    # runner start; the write-access check inside the action is what decides
+    # who may drive the agent.
     if: |
       (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@claude')) ||
       (github.event_name == 'pull_request_review_comment' && contains(github.event.comment.body, '@claude')) ||
       (github.event_name == 'pull_request_review' && contains(github.event.review.body, '@claude')) ||
       (github.event_name == 'issues' && (contains(github.event.issue.body, '@claude') || contains(github.event.issue.title, '@claude')))
 
-    # macOS so the agent has the Swift 6 toolchain and can run `make check`
-    # against the real target. Matches the CI runner for a consistent build.
-    # Standard runners are free on public repositories.
+    # macOS gives the agent the Swift 6 toolchain, so it validates with the
+    # real `make check` rather than proposing unbuilt changes. Matches the CI
+    # runner for a consistent build. Standard runners are free on public
+    # repositories.
     runs-on: macos-15
 
     # The minimum the action needs: read/write on the things it touches, plus
@@ -67,10 +70,19 @@ jobs:
           # agent's system prompt, so this shapes headless runs as well.
           settings: |
             {"outputStyle": "Concise"}
-          # Bash is off by default in this action; the make/swift allowances let
+          # The model is pinned because the action's runtime otherwise falls
+          # back to its own default, a smaller model than feature work here
+          # deserves, rather than to the account default.
+          #
+          # Bash is off by default in this action. The make/swift allowances let
           # the agent run its own `make check` before proposing a change, and
-          # nothing else. The pattern syntax follows the permission rules
-          # documented in the action's FAQ.
+          # the read-only git commands let it inspect its work; the action's
+          # own instructions tell it to use them. The pattern syntax follows
+          # the permission rules documented in the action's FAQ.
+          #
+          # The turn limit is a cost ceiling sized for feature work; a run that
+          # hits it fails visibly rather than silently truncating.
           claude_args: |
-            --max-turns 30
-            --allowedTools "Bash(make:*),Bash(swift:*),Edit,MultiEdit,Read,Write,Glob,Grep"
+            --model claude-opus-5
+            --max-turns 60
+            --allowedTools "Bash(make:*),Bash(swift:*),Bash(git status:*),Bash(git diff:*),Bash(git log:*),Edit,MultiEdit,Read,Write,Glob,Grep"

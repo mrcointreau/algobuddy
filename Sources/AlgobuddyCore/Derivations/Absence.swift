@@ -58,7 +58,11 @@ public enum Absence {
             allowableLag: allowableLag,
             roundsSinceLastSeen: elapsed,
             headroomRounds: headroom,
-            ratio: allowableLag > 0 ? Double(elapsed) / Double(allowableLag) : 0,
+            // `allowableLag` can be zero when a supply endpoint reports no online
+            // stake, in which case any elapsed round already exceeds it and the
+            // ratio must say so.
+            ratio: allowableLag > 0
+                ? Double(elapsed) / Double(allowableLag) : (elapsed > 0 ? .infinity : 0),
             // The overflow-safe form of the source's `lastSeen + allowableLag
             // < currentRound`.
             isAbsent: elapsed > allowableLag

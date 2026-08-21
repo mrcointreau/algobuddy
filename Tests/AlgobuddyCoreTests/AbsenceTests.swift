@@ -124,6 +124,35 @@ struct AbsenceTests {
         #expect(assessment.headroomRounds < 0)
     }
 
+    /// A supply endpoint reporting zero online stake drives `allowableLag` to
+    /// zero without tripping the overflow guard, so `ratio` must still honour
+    /// its documented scale rather than reporting a healthy account as "just
+    /// seen" while `isAbsent` fires the critical alert.
+    @Test("zero allowable lag keeps ratio consistent with isAbsent")
+    func zeroAllowableLag() throws {
+        let seenThisRound = try #require(
+            Absence.assess(
+                accountStake: Self.accountStake,
+                totalOnlineStake: MicroAlgos(0),
+                lastSeen: Self.currentRound,
+                currentRound: Self.currentRound,
+                params: .v40))
+        #expect(seenThisRound.allowableLag == 0)
+        #expect(!seenThisRound.isAbsent)
+        #expect(seenThisRound.ratio == 0)
+
+        let overdue = try #require(
+            Absence.assess(
+                accountStake: Self.accountStake,
+                totalOnlineStake: MicroAlgos(0),
+                lastSeen: Self.currentRound - 1,
+                currentRound: Self.currentRound,
+                params: .v40))
+        #expect(overdue.allowableLag == 0)
+        #expect(overdue.isAbsent)
+        #expect(overdue.ratio > 1.0)
+    }
+
     @Test("muldiv keeps full width and reports overflow instead of trapping")
     func muldiv() {
         #expect(Absence.muldiv(20, 1_886_826_685_238_820, 149_734_756_595) == 252_022)

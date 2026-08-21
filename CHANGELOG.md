@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.0.1](https://github.com/mrcointreau/algobuddy/compare/v1.0.0...v1.0.1) (2026-08-21)
+
+
+### Bug Fixes
+
+* **absence:** keep ratio consistent with isAbsent at zero lag ([2b2090d](https://github.com/mrcointreau/algobuddy/commit/2b2090d50a45135f959b8c56f94b0e59d033baff))
+* **absence:** keep ratio consistent with isAbsent at zero lag ([85c6a60](https://github.com/mrcointreau/algobuddy/commit/85c6a60869b3b6586799104a5a96ce3a4729247d))
+
 ## 1.0.0 (2026-08-20)
 
 

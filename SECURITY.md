@@ -20,10 +20,12 @@ This section is unusually short, and that is the point.
 
 ### What it talks to
 
-Exactly two hosts, both configurable in Settings:
+Monitoring contacts exactly two hosts, both configurable in Settings:
 
 - an algod endpoint, for `/v2/accounts`, `/v2/ledger/supply` and `/v2/blocks`
 - an indexer endpoint, for `/v2/block-headers`
+
+One further host is contacted only when you ask for it. **Check for Updates** in Settings makes a single anonymous `GET` to `api.github.com` for this repository's latest release tag. It sends no token, no address and nothing else about you; it happens on that click and at no other time, since there is no background check, no timer and no stored result. The answer is a version number and a link: **nothing is downloaded and nothing is executed**. Updating remains `git pull && make install`, run by you.
 
 No telemetry, no analytics, no crash reporting, and no third-party SDKs. The `dependencies` array in `Package.swift` is empty, so there is no supply chain beyond the Swift toolchain itself.
 
@@ -39,6 +41,8 @@ The app is distributed as source and built on your machine. Everything above is 
 grep -rn "URLSession\|http" Sources/   # every network call
 cat Package.swift                      # empty dependencies array
 ```
+
+The update check is worth reading in full, since it is the one request that leaves the hosts you configured: `Sources/AlgobuddyCore/Clients/UpdateChecker.swift` is the whole of it, and it compares two numbers.
 
 ## Distribution
 

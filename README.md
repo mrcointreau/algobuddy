@@ -36,6 +36,8 @@ Then open it, paste an Algorand address, and optionally tick **Open at login** i
 
 ## Updating
 
+Settings (⌘,) has a **Check for Updates** button. It asks GitHub for the latest release tag, compares it with the running version, and tells you which is newer. That request goes to `api.github.com`, carries nothing about you, and happens only when you click: there is no background check. Nothing is downloaded or run, so updating is still yours to do:
+
 ```bash
 cd algobuddy
 git pull
@@ -61,12 +63,14 @@ Everything lives in Settings (⌘,):
 - **Menu bar**: which metrics to show, with a live width estimate. A wide menu bar item isn't shortened on a notched display, it's hidden entirely
 - **Chain data source**: algod and indexer URLs, defaulting to a public provider. Point them at your own node if you'd rather not have a third party see which address you watch
 - **Notifications**: on by default
+- **Version**: the running build, and a manual check for a newer release
 
 ## What it deliberately doesn't do
 
 - **Connect to your node.** Not over SSH, a tunnel, a VPN, or an exposed endpoint. It never asks you to change `config.json` or install anything on the machine running algod.
 - **Hold keys.** It signs nothing and submits nothing.
 - **Store secrets.** There are none to store.
+- **Update itself.** The update check reads a version number and shows you a link. It downloads no code and runs nothing; `make install` stays a command you type.
 
 The cost is that it can't tell you your node is down until the chain notices, which in practice is the next challenge, roughly a day. The benefit is that installing it risks nothing.
 

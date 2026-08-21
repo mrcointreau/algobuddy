@@ -40,8 +40,10 @@ lint:
 format:
 	swift format --in-place --recursive $(SWIFT_SOURCES)
 
-# What CI runs.
-check: lint test
+# What CI runs. `build` is part of the gate because `swift test` compiles only
+# the library and its tests: without it the SwiftUI and AppKit layer is never
+# built, and a change that breaks it passes unnoticed.
+check: lint build test
 
 # Points git at the repo's commit-msg hook, which enforces Conventional
 # Commits. Opt-in rather than automatic, because it edits the contributor's

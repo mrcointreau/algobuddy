@@ -114,15 +114,7 @@ struct SettingsView: View {
                 .toggleStyle(.checkbox)
             }
 
-            // The stamped build identity, so a bug report can name the exact
-            // build: a version number on releases, a commit hash on development
-            // builds. Absent under `swift run`, where no bundle exists.
-            if let version = model.appVersion {
-                Text("algobuddy \(version)")
-                    .font(Typography.secondary)
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .center)
-            }
+            VersionFooter(model: model)
         }
         // Leaving a field commits it, the same contract as AddressField: an
         // edit abandoned by clicking elsewhere must not sit in the bound text
@@ -139,6 +131,120 @@ struct SettingsView: View {
         // exactly, so there is nothing left to scroll.
         .fixedSize(horizontal: false, vertical: true)
         .frame(width: 480)
+    }
+}
+
+/// The stamped build identity and a manual update check.
+///
+/// The app is installed by building from source, so nobody learns that a newer
+/// release exists unless they revisit the repository. The check is manual and
+/// says so: one request, when the button is clicked, and never otherwise.
+struct VersionFooter: View {
+    @Bindable var model: AppModel
+
+    var body: some View {
+        VStack(spacing: 6) {
+            // A version number on releases, a commit hash on development
+            // builds, so a bug report can name the exact build. Absent under
+            // `swift run`, where no bundle exists; the check still works there
+            // and reports that it cannot compare.
+            if let version = model.appVersion {
+                Text("algobuddy \(version)")
+                    .font(Typography.secondary)
+                    .foregroundStyle(.secondary)
+            }
+
+            HStack(spacing: 8) {
+                Button("Check for Updates") { model.checkForUpdates() }
+                    .disabled(model.isCheckingForUpdates)
+                if model.isCheckingForUpdates {
+                    // A spinner beside the control it belongs to, and unlabelled:
+                    // on macOS the indicator itself says that work is in flight,
+                    // and a word next to it repeats what the dimmed button has
+                    // already said. The accessibility label is not shown, and
+                    // exists because a bare indicator otherwise announces
+                    // nothing about what is being waited on.
+                    ProgressView()
+                        .controlSize(.small)
+                        .accessibilityLabel("Checking for updates.")
+                } else if let status = model.updateStatus {
+                    UpdateResult(status: status)
+                }
+            }
+
+            // The same disclosure the chain data source section makes: the one
+            // place this pane reaches a host the user did not configure.
+            Text("The check contacts github.com, and only when you click.")
+                .font(Typography.secondary)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, alignment: .center)
+    }
+}
+
+/// One line of text beside the button. Never an alert and never a
+/// notification: the user asked a question and is standing right here for the
+/// answer.
+private struct UpdateResult: View {
+    let status: UpdateStatus
+
+    var body: some View {
+        switch status {
+        case .upToDate:
+            Text("Up to date.")
+                .font(Typography.secondary).foregroundStyle(.secondary)
+        case .updateAvailable(let version, let url):
+            // The link opens the release page in the browser. Downloading and
+            // installing stays a deliberate `git pull && make install`, which
+            // is what keeps the app something that never fetches code.
+            LinkedResult(
+                leading: "Version", linkTitle: version, trailing: "is available.", url: url,
+                spoken: "Version \(version) is available.")
+        case .cannotCompare(let latest, let url):
+            // Never "up to date" without evidence: this build carries no
+            // version to compare, so the latest release is named and the user
+            // decides.
+            LinkedResult(
+                leading: "Latest release is", linkTitle: latest, url: url,
+                spoken: "Latest release is \(latest).")
+        case .failed(let message):
+            // Red, the same convention the login item error uses, so this pane
+            // marks a failure one way. The message is a whole sentence and
+            // carries the outcome by itself, because a colour is not readable
+            // to everyone and is not a message.
+            Text(message).font(Typography.secondary).foregroundStyle(.red)
+        }
+    }
+}
+
+/// A result line built around the release link.
+///
+/// VoiceOver treats a row of text views as separate elements, so the line is
+/// otherwise read out as fragments. The words around the link are hidden from
+/// it and the sentence they form becomes the link's own label, which leaves one
+/// element that reads the whole line and can still be focused and opened.
+private struct LinkedResult: View {
+    let leading: String
+    let linkTitle: String
+    var trailing: String?
+    let url: URL
+    /// The line as one sentence, for VoiceOver.
+    let spoken: String
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Text(leading)
+                .font(Typography.secondary).foregroundStyle(.secondary)
+                .accessibilityHidden(true)
+            Link(linkTitle, destination: url)
+                .font(Typography.secondary)
+                .accessibilityLabel(spoken)
+            if let trailing {
+                Text(trailing)
+                    .font(Typography.secondary).foregroundStyle(.secondary)
+                    .accessibilityHidden(true)
+            }
+        }
     }
 }
 

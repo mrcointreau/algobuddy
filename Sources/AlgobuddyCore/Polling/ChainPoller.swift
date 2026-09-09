@@ -35,6 +35,18 @@ public struct ChainPollerConfig: Sendable {
 public struct PollFailure: Sendable, Equatable {
     public enum Stage: String, Sendable {
         case account, supply, challengeSeed, rewards
+
+        /// Whether the stage belongs to the cycle rather than to one watched
+        /// account. Supply and the challenge seed are fetched once and reach
+        /// every account, so a failure there is worth stating for the whole
+        /// portfolio; an account fetch and its rewards query are one address's
+        /// own, and saying so portfolio-wide would blame every account for one.
+        public var isShared: Bool {
+            switch self {
+            case .supply, .challengeSeed: true
+            case .account, .rewards: false
+            }
+        }
     }
     public let stage: Stage
     public let message: String

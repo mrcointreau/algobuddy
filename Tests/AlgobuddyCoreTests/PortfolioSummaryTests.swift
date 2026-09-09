@@ -127,6 +127,28 @@ struct PortfolioSummaryTests {
         #expect(summary.proposals7d == 13)
         #expect(summary.earned24h == MicroAlgos(12_000_000))
         #expect(summary.earned7d == MicroAlgos(48_000_000))
+        #expect(summary.hasRewards)
+    }
+
+    /// Zero proposals is what both an unanswered indexer and a quiet week look
+    /// like, so a surface that shows the totals needs to know which it has.
+    @Test("no proposal history at all is distinguishable from none proposed")
+    func rewardsPresence() {
+        let none = PortfolioSummary(
+            entries: [AccountUpdate(address: address(1), account: account(address(1), amount: 1))],
+            roundTime: roundTime)
+        #expect(!none.hasRewards)
+        #expect(none.proposals7d == 0)
+
+        let quiet = PortfolioSummary(
+            entries: [
+                AccountUpdate(
+                    address: address(1), account: account(address(1), amount: 1),
+                    rewards: rewards())
+            ],
+            roundTime: roundTime)
+        #expect(quiet.hasRewards)
+        #expect(quiet.proposals7d == 0)
     }
 
     @Test("only Online accounts are counted as online")

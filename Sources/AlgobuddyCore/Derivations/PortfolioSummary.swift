@@ -29,6 +29,11 @@ public struct PortfolioSummary: Sendable, Equatable {
     public var proposals7d = 0
     public var earned24h = MicroAlgos.zero
     public var earned7d = MicroAlgos.zero
+    /// Whether any account has reported a proposal history at all. The sums
+    /// below read as zero both before the first indexer answer and for a
+    /// portfolio that has genuinely proposed nothing, and only this tells the
+    /// two apart, so a surface can stay silent rather than claim "0 blocks".
+    public var hasRewards = false
     /// Any account whose proposal history was cut short by the page budget
     /// makes the totals above a floor, so the caveat travels with them.
     public var isTruncated = false
@@ -55,6 +60,7 @@ public struct PortfolioSummary: Sendable, Equatable {
             }
 
             if let rewards = entry.rewards {
+                hasRewards = true
                 proposals24h += rewards.proposals24h
                 proposals7d += rewards.proposals7d
                 earned24h = MicroAlgos(earned24h.raw &+ rewards.earned24h.raw)

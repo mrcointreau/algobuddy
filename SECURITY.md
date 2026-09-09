@@ -16,7 +16,7 @@ This section is unusually short, and that is the point.
 
 **No signing.** It holds no spending key, constructs no transaction, and submits nothing to the network. Nothing it does can move funds or change your account's participation state.
 
-**One public address.** The only thing you give it is an Algorand address, which is public information already recorded on chain.
+**Public addresses only.** The only things you give it are Algorand addresses, which are public information already recorded on chain.
 
 ### What it talks to
 

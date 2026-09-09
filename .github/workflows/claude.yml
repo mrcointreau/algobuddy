@@ -84,5 +84,5 @@ jobs:
           # hits it fails visibly rather than silently truncating.
           claude_args: |
             --model claude-opus-5
-            --max-turns 60
+            --max-turns 120
             --allowedTools "Bash(make:*),Bash(swift:*),Bash(git status:*),Bash(git diff:*),Bash(git log:*),Edit,MultiEdit,Read,Write,Glob,Grep"

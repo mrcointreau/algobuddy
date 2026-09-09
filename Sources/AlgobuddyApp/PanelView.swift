@@ -91,24 +91,20 @@ struct PanelView: View {
                 // another account's figures. The edit buffer stands in only when
                 // nothing has been applied, which cannot happen while the header
                 // shows, because a running watch always has an applied address.
-                Text(
-                    Format.addressLabel(
-                        model.watchedAddress ?? model.addressText, hidden: model.valuesHidden)
-                )
-                .font(Typography.primary)
-                .textSelection(.enabled)
-                // Selecting the header text only yields the abbreviated form,
-                // which no explorer accepts, so the menu offers the full address.
-                // Deliberately available while values are hidden: the mask guards
-                // against onlookers, and the clipboard is not on screen.
-                .contextMenu {
-                    Button("Copy Address") {
-                        let pasteboard = NSPasteboard.general
-                        pasteboard.clearContents()
-                        pasteboard.setString(
-                            model.watchedAddress ?? model.addressText, forType: .string)
+                Text(Format.addressLabel(model.watchedAddress, hidden: model.valuesHidden))
+                    .font(Typography.primary)
+                    .textSelection(.enabled)
+                    // Selecting the header text only yields the abbreviated form,
+                    // which no explorer accepts, so the menu offers the full address.
+                    // Deliberately available while values are hidden: the mask guards
+                    // against onlookers, and the clipboard is not on screen.
+                    .contextMenu {
+                        Button("Copy Address") {
+                            let pasteboard = NSPasteboard.general
+                            pasteboard.clearContents()
+                            pasteboard.setString(model.watchedAddress, forType: .string)
+                        }
                     }
-                }
             }
             Spacer()
             // Ticks on its own. A plain Text would freeze at whatever the age

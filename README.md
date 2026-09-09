@@ -59,7 +59,7 @@ make purge       # the same, and also forgets the address and settings
 
 Everything lives in Settings (⌘,):
 
-- **Account**: the address to watch
+- **Account**: the addresses to watch, added and removed a row at a time. There's no limit on how many; each one adds a request to every poll, and the panel grows a portfolio summary once you watch more than one
 - **Menu bar**: which metrics to show, with a live width estimate. A wide menu bar item isn't shortened on a notched display, it's hidden entirely
 - **Chain data source**: algod and indexer URLs, defaulting to a public provider. Point them at your own node if you'd rather not have a third party see which address you watch
 - **Notifications**: on by default

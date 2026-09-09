@@ -49,9 +49,24 @@ final class AppModel {
     /// otherwise the last one that did.
     var display: ChainPoller.Update? { update?.hasData == true ? update : lastData }
 
-    /// The watched account's share of the displayed update. One address is
-    /// configured, so there is one entry.
-    var displayEntry: AccountUpdate? { display?.entries.first }
+    /// How many accounts the displayed data covers. The panel grows a portfolio
+    /// summary and per-account labels only past one, and the menu bar and
+    /// notifications name accounts only past one, so this is the switch for all
+    /// of them: with a single account every surface reads as it always has.
+    var accountCount: Int { display?.entries.count ?? 0 }
+
+    /// The failure worth stating for the whole panel: a shared stage, which
+    /// every account's figures depend on, or a failure that every watched
+    /// account has, where repeating the same sentence per address would say
+    /// nothing more. One account's own trouble is its own line instead, beside
+    /// its own facts. With a single account watched, its failure is by
+    /// definition every account's, so this reads exactly as it always has.
+    var sharedFailure: PollFailure? {
+        guard let update, let failure = update.failure else { return nil }
+        guard failure.stage.isShared || update.entries.allSatisfy({ $0.failure != nil })
+        else { return nil }
+        return failure
+    }
 
     private var poller: ChainPoller?
     private var streamTask: Task<Void, Never>?
@@ -126,31 +141,34 @@ final class AppModel {
     /// The menu bar text, in `allCases` order so it reads the same however the
     /// checkboxes were clicked. Empty when nothing is selected, which is how
     /// "icon only" is expressed.
+    ///
+    /// Read from the portfolio rather than from one account: the round is
+    /// shared by the cycle, the two countdowns show whichever account runs out
+    /// first, and the proposal figures are sums. With one account watched every
+    /// one of those is that account's own value.
     var menuBarSegments: [String] {
-        guard let update = display, let entry = update.entries.first else { return [] }
+        guard let update = display else { return [] }
+        let portfolio = update.portfolio
         return MenuBarMetric.allCases.filter(metrics.contains).compactMap { metric in
             switch metric {
             case .round:
                 // "#" marks it as an index rather than a quantity.
                 return update.currentRound.map { "#" + Format.round($0) }
             case .absenceHeadroom:
-                return entry.absence.map {
-                    Format.duration($0.headroom(roundTime: update.roundTime))
-                }
+                return portfolio.closestAbsenceHeadroom.map(Format.duration)
             case .keyExpiry:
-                return entry.keyExpiry.map {
-                    Format.duration($0.timeRemaining(roundTime: update.roundTime))
-                }
+                return portfolio.closestKeyExpiry.map(Format.duration)
             case .proposals24h:
-                return entry.rewards.map { "\($0.proposals24h) blk" }
+                // Silent until the indexer has answered for some account, so a
+                // pending fetch cannot read as "no blocks today".
+                return portfolio.hasRewards ? "\(portfolio.proposals24h) blk" : nil
             case .earned24h:
-                return entry.rewards.map {
-                    // Masked rather than dropped: removing the segment would
-                    // shrink the item and shove every icon to its left along.
-                    valuesHidden
-                        ? "\(Format.hidden(4)) \(MenuBar.algo)"
-                        : "\(Format.algos($0.earned24h, decimals: 1)) \(MenuBar.algo)"
-                }
+                guard portfolio.hasRewards else { return nil }
+                // Masked rather than dropped: removing the segment would
+                // shrink the item and shove every icon to its left along.
+                return valuesHidden
+                    ? "\(Format.hidden(4)) \(MenuBar.algo)"
+                    : "\(Format.algos(portfolio.earned24h, decimals: 1)) \(MenuBar.algo)"
             }
         }
     }
@@ -627,6 +645,13 @@ final class AppModel {
         let content = UNMutableNotificationContent()
         content.title = alert.title
         content.body = alert.body
+        // Which account this holds for. Only past one watched account: with a
+        // single one the banner would name the only thing it could be about.
+        // Masked like every other surface, because a banner is on screen during
+        // exactly the screen share the mask is for.
+        if accountCount > 1, let address = alert.address {
+            content.subtitle = Format.addressLabel(address.stringValue, hidden: valuesHidden)
+        }
         content.sound = alert.severity == .critical ? .default : nil
 
         UNUserNotificationCenter.current().add(

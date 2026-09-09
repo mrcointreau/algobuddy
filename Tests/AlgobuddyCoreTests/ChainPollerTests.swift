@@ -751,6 +751,30 @@ struct ChainPollerTests {
         #expect(await poller.nextDelay == 5)  // now the shared backoff engages
     }
 
+    /// A surface that states one address's trouble for the whole portfolio
+    /// would blame every account for one of them, so the failure has to say
+    /// which kind it is.
+    @Test("one account's failure is not shared, a supply failure is")
+    func failureScope() async throws {
+        let stub = StubFetcher()
+        let clock = TestClock()
+        let second = Self.filledAddress(0x11)
+        accountRoute(stub, address)  // the second address has no route, so it 404s
+        sharedRoutes(stub)
+
+        let oneAccount = await makePoller(stub: stub, clock: clock, addresses: [address, second])
+            .pollOnce()
+        #expect(oneAccount.entry(for: second)?.failure?.stage.isShared == false)
+
+        // The denominator every account's absence assessment needs, gone.
+        stub.route("/v2/ledger/supply", status: 500, json: "{}")
+        accountRoute(stub, second)
+        let shared = await makePoller(stub: stub, clock: clock, addresses: [address, second])
+            .pollOnce()
+        #expect(shared.failure?.stage == .supply)
+        #expect(shared.failure?.stage.isShared == true)
+    }
+
     /// Cooldowns are held per account as well as per rule. Keyed on the rule
     /// alone, the first account to notify would silence every other account's
     /// first alert of the same kind for the whole cooldown.

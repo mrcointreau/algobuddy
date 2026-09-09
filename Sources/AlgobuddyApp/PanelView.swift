@@ -25,7 +25,7 @@ struct PanelView: View {
         header
         Divider()
 
-        if let update = model.display, let entry = model.displayEntry, let account = entry.account {
+        if let update = model.display, update.hasData {
             // Unscrolled for the same reason as SettingsView. Content here does
             // vary (the alert list grows), so the window grows with it. A taller
             // panel when several alerts hold reads far better than a short one
@@ -33,16 +33,28 @@ struct PanelView: View {
             // Spacing separates the groups. Dividers are reserved for the
             // structural split between the panel's chrome and its content.
             VStack(alignment: .leading, spacing: Spacing.group) {
-                AccountCard(update: update, entry: entry, account: account)
-                if let rewards = entry.rewards {
-                    RewardsCard(rewards: rewards)
+                let isPortfolio = update.entries.count > 1
+                // A failure every account has is stated once beneath them all,
+                // by the panel-wide line below, rather than repeated per
+                // address. That is always the case for a single account.
+                let isFailingThroughout = update.entries.allSatisfy { $0.failure != nil }
+                // Only past one account. With a single one the summary would
+                // restate the card beneath it fact for fact, so the panel reads
+                // exactly as it always has.
+                if isPortfolio {
+                    PortfolioCard(summary: update.portfolio)
+                }
+                ForEach(update.entries, id: \.address) { entry in
+                    AccountSection(
+                        update: update, entry: entry, isLabelled: isPortfolio,
+                        statesOwnFailure: !isFailingThroughout)
                 }
                 // visibleAlerts, not this update's own list: during an outage
                 // the displayed data is the last good poll, and the outage
                 // alert colouring the menu bar icon lives on the latest failed
                 // one. The card must be able to explain the icon.
                 if !model.visibleAlerts.isEmpty {
-                    AlertsCard(alerts: model.visibleAlerts)
+                    AlertsCard(alerts: model.visibleAlerts, namesAccounts: isPortfolio)
                 }
                 // Degradation, stated rather than implied. Partial failures
                 // (supply, challenge seed, rewards) ride on successful polls
@@ -50,7 +62,8 @@ struct PanelView: View {
                 // line is the only sign some figures are stale or missing. A
                 // wholly failed poll leaves the cards above showing the last
                 // good data, aging in the header; this line names the reason.
-                if let failure = model.update?.failure {
+                // One account's own failure is not here but on its section.
+                if let failure = model.sharedFailure {
                     Label(failure.message, systemImage: "wifi.exclamationmark")
                         .font(Typography.secondary)
                         .foregroundStyle(.secondary)
@@ -67,26 +80,34 @@ struct PanelView: View {
     /// below, stated once rather than repeated here as a second indicator.
     private var header: some View {
         HStack(spacing: 8) {
-            // The applied address: a half-typed Settings draft must not head
-            // another account's figures. The edit buffer stands in only when
-            // nothing has been applied, which cannot happen while the header
-            // shows, because a running watch always has an applied address.
-            Text(
-                model.valuesHidden
-                    ? Format.hidden() : Format.address(model.watchedAddress ?? model.addressText)
-            )
-            .font(Typography.primary)
-            .textSelection(.enabled)
-            // Selecting the header text only yields the abbreviated form,
-            // which no explorer accepts, so the menu offers the full address.
-            // Deliberately available while values are hidden: the mask guards
-            // against onlookers, and the clipboard is not on screen.
-            .contextMenu {
-                Button("Copy Address") {
-                    let pasteboard = NSPasteboard.general
-                    pasteboard.clearContents()
-                    pasteboard.setString(
-                        model.watchedAddress ?? model.addressText, forType: .string)
+            if model.accountCount > 1 {
+                // Every account is named by its own section below, so the
+                // header states the size of the portfolio rather than electing
+                // one address to stand for all of them.
+                Text(quantity(Double(model.accountCount), "account"))
+                    .font(Typography.primary)
+            } else {
+                // The applied address: a half-typed Settings draft must not head
+                // another account's figures. The edit buffer stands in only when
+                // nothing has been applied, which cannot happen while the header
+                // shows, because a running watch always has an applied address.
+                Text(
+                    Format.addressLabel(
+                        model.watchedAddress ?? model.addressText, hidden: model.valuesHidden)
+                )
+                .font(Typography.primary)
+                .textSelection(.enabled)
+                // Selecting the header text only yields the abbreviated form,
+                // which no explorer accepts, so the menu offers the full address.
+                // Deliberately available while values are hidden: the mask guards
+                // against onlookers, and the clipboard is not on screen.
+                .contextMenu {
+                    Button("Copy Address") {
+                        let pasteboard = NSPasteboard.general
+                        pasteboard.clearContents()
+                        pasteboard.setString(
+                            model.watchedAddress ?? model.addressText, forType: .string)
+                    }
                 }
             }
             Spacer()
@@ -350,6 +371,103 @@ struct MenuRowLabel: View {
 
 // MARK: - Cards
 
+/// What the watched accounts amount to together, ahead of their individual
+/// facts.
+///
+/// The two countdowns are the closest across the portfolio, because it is as
+/// healthy as its worst account; the money and the blocks are sums, because
+/// those genuinely add up. Every row here is a plain fact: what any of them
+/// means is the Attention section's to say, and grading them here would invent
+/// a second opinion about the same numbers.
+struct PortfolioCard: View {
+    let summary: PortfolioSummary
+    @Environment(\.valuesHidden) private var isHidden
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Spacing.heading) {
+            Text("Portfolio").font(Typography.sectionHeader).foregroundStyle(.secondary)
+
+            VStack(alignment: .leading, spacing: Spacing.row) {
+                HStack(spacing: 6) {
+                    Text(participationText).font(Typography.primary.weight(.medium))
+                    Spacer()
+                    Text(Format.algosLabel(summary.totalStake, hidden: isHidden))
+                        .font(Typography.primary.monospacedDigit())
+                }
+
+                if let headroom = summary.closestAbsenceHeadroom {
+                    ValueRow(
+                        title: "Closest absence headroom", detail: Format.duration(headroom))
+                }
+                if let expiry = summary.closestKeyExpiry {
+                    ValueRow(title: "Closest key expiry", detail: Format.duration(expiry))
+                }
+
+                if summary.hasRewards {
+                    ProposalsGrid(
+                        proposals24h: summary.proposals24h, earned24h: summary.earned24h,
+                        proposals7d: summary.proposals7d, earned7d: summary.earned7d)
+                }
+                if summary.isTruncated {
+                    TruncationNote()
+                }
+            }
+        }
+    }
+
+    /// How much of the portfolio is actually participating. An account whose
+    /// fetch failed is in neither number, so this counts what is known now.
+    private var participationText: String {
+        "\(summary.onlineAccounts) of \(quantity(Double(summary.accountCount), "account")) online"
+    }
+}
+
+/// One watched account's facts: its card and its proposals, or a quiet line
+/// when this cycle learned nothing about it.
+///
+/// The address heads the section only when more than one account is watched.
+/// With one, the panel header already names it, and repeating it would say the
+/// same thing twice in the space of two lines.
+struct AccountSection: View {
+    /// The cycle, for the round and round time every account shares.
+    let update: ChainPoller.Update
+    let entry: AccountUpdate
+    let isLabelled: Bool
+    /// Whether this account's own failure belongs here. False when every
+    /// account is failing, which the panel states once beneath them all.
+    let statesOwnFailure: Bool
+    @Environment(\.valuesHidden) private var isHidden
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Spacing.heading) {
+            if isLabelled {
+                Text(Format.addressLabel(entry.address.stringValue, hidden: isHidden))
+                    .font(Typography.sectionHeader)
+                    .foregroundStyle(.secondary)
+            }
+
+            VStack(alignment: .leading, spacing: Spacing.group) {
+                if let account = entry.account {
+                    AccountCard(update: update, entry: entry, account: account)
+                    if let rewards = entry.rewards {
+                        RewardsCard(rewards: rewards)
+                    }
+                }
+                // Degradation, stated rather than implied, and attributed:
+                // whether this account could not be fetched at all or only its
+                // proposals could not, the other accounts above and below are
+                // still current and must not wear the reason.
+                if statesOwnFailure, let failure = entry.failure {
+                    Label(failure.message, systemImage: "wifi.exclamationmark")
+                        .font(Typography.secondary)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
+    }
+}
+
 struct AccountCard: View {
     /// The cycle, for the round and the round time it shares with every
     /// account, and for the alerts it evaluated.
@@ -443,35 +561,49 @@ struct AccountCard: View {
 
 struct RewardsCard: View {
     let rewards: RewardsSummary
-    /// Only the ALGO amounts are masked. Masking the block counts too would
-    /// leave the card with nothing to read, and a proposal count still tracks
-    /// the account's share of online stake, so this is a screen-sharing
-    /// convenience rather than concealment.
-    @Environment(\.valuesHidden) private var isHidden
 
-    /// A `Grid`, so the counts and the amounts each form their own column and
-    /// align down the rows. HIG: "Align components with one another to make them
-    /// easier to scan."
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.heading) {
             Text("Proposals").font(Typography.sectionHeader).foregroundStyle(.secondary)
 
-            Grid(horizontalSpacing: 10, verticalSpacing: Spacing.row) {
-                row("24h", rewards.proposals24h, rewards.earned24h)
-                row("7d", rewards.proposals7d, rewards.earned7d)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
+            ProposalsGrid(
+                proposals24h: rewards.proposals24h, earned24h: rewards.earned24h,
+                proposals7d: rewards.proposals7d, earned7d: rewards.earned7d)
 
             if rewards.unpaidProposals > 0 {
                 Text("\(quantity(Double(rewards.unpaidProposals), "proposal")) earned nothing")
                     .font(Typography.secondary).foregroundStyle(.orange)
             }
             if rewards.isTruncated {
-                Text("Recent proposals may be missing, so these totals are a minimum.")
-                    .font(Typography.secondary).foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+                TruncationNote()
             }
         }
+    }
+}
+
+/// The 24-hour and 7-day proposal figures.
+///
+/// A `Grid`, so the counts and the amounts each form their own column and align
+/// down the rows. HIG: "Align components with one another to make them easier to
+/// scan." Shared by one account's card and the portfolio summary, so the same
+/// two figures cannot be laid out or masked two different ways.
+struct ProposalsGrid: View {
+    let proposals24h: Int
+    let earned24h: MicroAlgos
+    let proposals7d: Int
+    let earned7d: MicroAlgos
+    /// Only the ALGO amounts are masked. Masking the block counts too would
+    /// leave the rows with nothing to read, and a proposal count still tracks
+    /// the account's share of online stake, so this is a screen-sharing
+    /// convenience rather than concealment.
+    @Environment(\.valuesHidden) private var isHidden
+
+    var body: some View {
+        Grid(horizontalSpacing: 10, verticalSpacing: Spacing.row) {
+            row("24h", proposals24h, earned24h)
+            row("7d", proposals7d, earned7d)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private func row(_ span: String, _ blocks: Int, _ earned: MicroAlgos) -> some View {
@@ -496,8 +628,23 @@ struct RewardsCard: View {
     }
 }
 
+/// Says that the proposal figures above are a floor. Shared, so the caveat
+/// cannot be worded one way for an account and another for the portfolio.
+struct TruncationNote: View {
+    var body: some View {
+        Text("Recent proposals may be missing, so these totals are a minimum.")
+            .font(Typography.secondary).foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+}
+
 struct AlertsCard: View {
     let alerts: [HealthAlert]
+    /// Whether an entry names the account it holds for. Only past one watched
+    /// account: with a single one there is nothing to tell apart, and the
+    /// address would be a label on the only thing it could be about.
+    let namesAccounts: Bool
+    @Environment(\.valuesHidden) private var isHidden
 
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.heading) {
@@ -507,7 +654,10 @@ struct AlertsCard: View {
             // the title, so the title binds to the list rather than floating
             // between it and whatever is above.
             VStack(alignment: .leading, spacing: Spacing.row) {
-                ForEach(alerts, id: \.id) { alert in
+                // Keyed on rule *and* account: the same condition can hold for
+                // several accounts at once, and a repeated identity would let
+                // SwiftUI drop all but one of them.
+                ForEach(alerts, id: \.key) { alert in
                     let level = MeterLevel(alert.severity)
                     HStack(alignment: .top, spacing: 6) {
                         Image(systemName: level.alertSymbol)
@@ -515,7 +665,17 @@ struct AlertsCard: View {
                             .font(Typography.primary)
 
                         VStack(alignment: .leading, spacing: 1) {
-                            Text(alert.title).font(Typography.primary.weight(.medium))
+                            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                                Text(alert.title).font(Typography.primary.weight(.medium))
+                                if namesAccounts, let address = alert.address {
+                                    Text(
+                                        Format.addressLabel(
+                                            address.stringValue, hidden: isHidden)
+                                    )
+                                    .font(Typography.secondary)
+                                    .foregroundStyle(.secondary)
+                                }
+                            }
                             Text(alert.body)
                                 .font(Typography.secondary).foregroundStyle(.secondary)
                                 .fixedSize(horizontal: false, vertical: true)

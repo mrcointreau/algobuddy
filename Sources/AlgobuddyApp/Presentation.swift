@@ -247,6 +247,13 @@ enum Format {
         hidden ? "\(Self.hidden()) ALGO" : "\(algos(amount, decimals: decimals)) ALGO"
     }
 
+    /// A shortened address, or its mask, on the same terms as `algosLabel`.
+    /// Every surface that names an account goes through here, so a new one
+    /// cannot show a real address while values are hidden.
+    static func addressLabel(_ value: String, hidden: Bool) -> String {
+        hidden ? Self.hidden() : address(value)
+    }
+
     /// Compact and, crucially, **fixed width**. A menu bar item that grows a
     /// character every few seconds shoves everything to its left around.
     static func round(_ value: UInt64) -> String {

@@ -61,8 +61,9 @@ struct OnboardingView: View {
 /// labels of differing widths and fields that do not line up.
 ///
 /// Changes take effect as they are made, as macOS settings do, rather than
-/// behind an Apply button. Text fields commit on Return or focus loss, which
-/// avoids restarting the poller on every keystroke of a URL.
+/// behind an Apply button. Text fields commit on Return, on focus loss, and
+/// when the window closes, which avoids restarting the poller on every
+/// keystroke of a URL while leaving no way to lose an edit.
 struct SettingsView: View {
     @Bindable var model: AppModel
 
@@ -132,6 +133,11 @@ struct SettingsView: View {
         .onChange(of: focusedURL) { old, _ in
             if old != nil { model.apply() }
         }
+        // Closing the window commits too. Dismissing the pane does not move
+        // focus out of the field being typed in, so without this an address
+        // entered and then dismissed would sit in the edit buffer, watched by
+        // nothing, until the pane was next opened.
+        .background(CommitOnClose { model.apply() })
         .formStyle(.grouped)
         // A grouped Form is a scroll view underneath, and a scroll view reports a
         // small ideal height, the same trap as the panel. Taking the content's
@@ -139,6 +145,50 @@ struct SettingsView: View {
         // exactly, so there is nothing left to scroll.
         .fixedSize(horizontal: false, vertical: true)
         .frame(width: 480)
+    }
+}
+
+/// Runs a commit when the window holding this view is about to close.
+///
+/// SwiftUI has no window lifecycle to hook from a Settings scene, so the
+/// closing window is reached through an invisible AppKit view planted behind
+/// the form. The observation is scoped to that one window, so the panel opening
+/// and closing all day never triggers a commit.
+private struct CommitOnClose: NSViewRepresentable {
+    let commit: () -> Void
+
+    func makeNSView(context: Context) -> CloseCommitView {
+        let view = CloseCommitView()
+        view.commit = commit
+        return view
+    }
+
+    func updateNSView(_ view: CloseCommitView, context: Context) {
+        view.commit = commit
+    }
+}
+
+/// The planted view. It has no window until AppKit places it in a hierarchy,
+/// which is why the observer is registered from `viewDidMoveToWindow` rather
+/// than at construction, and removed there when the view leaves a window so no
+/// observation outlives the pane.
+private final class CloseCommitView: NSView {
+    var commit: () -> Void = {}
+    private var observer: (any NSObjectProtocol)?
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        if let observer {
+            NotificationCenter.default.removeObserver(observer)
+            self.observer = nil
+        }
+        guard let window else { return }
+        observer = NotificationCenter.default.addObserver(
+            forName: NSWindow.willCloseNotification, object: window, queue: .main
+        ) { [weak self] _ in
+            // Posted on the main thread, where this view and the model live.
+            MainActor.assumeIsolated { self?.commit() }
+        }
     }
 }
 

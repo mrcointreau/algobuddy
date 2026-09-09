@@ -11,8 +11,8 @@ public struct AlertDispatcher: Sendable, Equatable {
     /// How long before a still-holding alert notifies again.
     public var cooldown: TimeInterval
 
-    private var lastNotified: [AlertID: Date] = [:]
-    private var lastSeverity: [AlertID: AlertSeverity] = [:]
+    private var lastNotified: [AlertKey: Date] = [:]
+    private var lastSeverity: [AlertKey: AlertSeverity] = [:]
 
     /// - Parameters:
     ///   - lastNotified: Notification times persisted from an earlier run.
@@ -24,8 +24,8 @@ public struct AlertDispatcher: Sendable, Equatable {
     ///     severity to compare against.
     public init(
         cooldown: TimeInterval = 900,
-        lastNotified: [AlertID: Date] = [:],
-        lastSeverity: [AlertID: AlertSeverity] = [:]
+        lastNotified: [AlertKey: Date] = [:],
+        lastSeverity: [AlertKey: AlertSeverity] = [:]
     ) {
         self.cooldown = cooldown
         self.lastNotified = lastNotified
@@ -33,11 +33,11 @@ public struct AlertDispatcher: Sendable, Equatable {
     }
 
     /// Notification times, for the caller to persist and hand back on relaunch.
-    public var notificationHistory: [AlertID: Date] { lastNotified }
+    public var notificationHistory: [AlertKey: Date] { lastNotified }
 
     /// Severities at last evaluation, persisted with `notificationHistory` so
     /// escalation detection survives a relaunch.
-    public var severityHistory: [AlertID: AlertSeverity] { lastSeverity }
+    public var severityHistory: [AlertKey: AlertSeverity] { lastSeverity }
 
     /// Returns the subset of `alerts` to notify about now.
     ///
@@ -50,17 +50,18 @@ public struct AlertDispatcher: Sendable, Equatable {
         var notify = [HealthAlert]()
 
         for alert in alerts {
-            let escalated = lastSeverity[alert.id].map { alert.severity > $0 } ?? false
+            let key = alert.key
+            let escalated = lastSeverity[key].map { alert.severity > $0 } ?? false
             let cooledDown =
-                lastNotified[alert.id].map {
+                lastNotified[key].map {
                     now.timeIntervalSince($0) >= cooldown
                 } ?? true
 
             if escalated || cooledDown {
                 notify.append(alert)
-                lastNotified[alert.id] = now
+                lastNotified[key] = now
             }
-            lastSeverity[alert.id] = alert.severity
+            lastSeverity[key] = alert.severity
         }
 
         // `lastSeverity` survives a clear on purpose. Without a remembered

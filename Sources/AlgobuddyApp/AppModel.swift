@@ -47,7 +47,11 @@ final class AppModel {
 
     /// What the panel and menu bar render: the latest update when it has data,
     /// otherwise the last one that did.
-    var display: ChainPoller.Update? { update?.account != nil ? update : lastData }
+    var display: ChainPoller.Update? { update?.hasData == true ? update : lastData }
+
+    /// The watched account's share of the displayed update. One address is
+    /// configured, so there is one entry.
+    var displayEntry: AccountUpdate? { display?.entries.first }
 
     private var poller: ChainPoller?
     private var streamTask: Task<Void, Never>?
@@ -76,8 +80,8 @@ final class AppModel {
     /// What was last written to UserDefaults, so the steady state (no new
     /// notifications, which is almost every poll) costs no write at all rather
     /// than a serialisation and cfprefsd round trip every 30 seconds.
-    private var persistedHistory: [AlertID: Date]?
-    private var persistedSeverities: [AlertID: AlertSeverity]?
+    private var persistedHistory: [AlertKey: Date]?
+    private var persistedSeverities: [AlertKey: AlertSeverity]?
     /// Keeps banners visible while the app itself is active; see the class.
     private let notificationPresenter = NotificationPresenter()
 
@@ -107,7 +111,7 @@ final class AppModel {
     /// so the panel can always explain the icon.
     var visibleAlerts: [HealthAlert] {
         guard let display else { return update?.alerts ?? [] }
-        guard let update, update.account == nil else { return display.alerts }
+        guard let update, !update.hasData else { return display.alerts }
         return (display.alerts + update.alerts).sorted { $0.severity > $1.severity }
     }
 
@@ -116,31 +120,31 @@ final class AppModel {
         // update's are quiet and health stays put, which is the point: one
         // dropped request must not flick the icon to unknown. Quiet is healthy
         // only when there is data to be healthy about.
-        HealthLevel(worstOf: visibleAlerts.map(\.severity), hasData: display?.account != nil)
+        HealthLevel(worstOf: visibleAlerts.map(\.severity), hasData: display?.hasData == true)
     }
 
     /// The menu bar text, in `allCases` order so it reads the same however the
     /// checkboxes were clicked. Empty when nothing is selected, which is how
     /// "icon only" is expressed.
     var menuBarSegments: [String] {
-        guard let update = display else { return [] }
+        guard let update = display, let entry = update.entries.first else { return [] }
         return MenuBarMetric.allCases.filter(metrics.contains).compactMap { metric in
             switch metric {
             case .round:
                 // "#" marks it as an index rather than a quantity.
                 return update.currentRound.map { "#" + Format.round($0) }
             case .absenceHeadroom:
-                return update.absence.map {
+                return entry.absence.map {
                     Format.duration($0.headroom(roundTime: update.roundTime))
                 }
             case .keyExpiry:
-                return update.keyExpiry.map {
+                return entry.keyExpiry.map {
                     Format.duration($0.timeRemaining(roundTime: update.roundTime))
                 }
             case .proposals24h:
-                return update.rewards.map { "\($0.proposals24h) blk" }
+                return entry.rewards.map { "\($0.proposals24h) blk" }
             case .earned24h:
-                return update.rewards.map {
+                return entry.rewards.map {
                     // Masked rather than dropped: removing the segment would
                     // shrink the item and shove every icon to its left along.
                     valuesHidden
@@ -470,7 +474,7 @@ final class AppModel {
 
     private func receive(_ value: ChainPoller.Update) {
         update = value
-        if value.account != nil { lastData = value }
+        if value.hasData { lastData = value }
         saveAlertHistory(value.alertHistory, severities: value.alertSeverities)
         if let failure = value.failure {
             failureCount += 1
@@ -529,41 +533,42 @@ final class AppModel {
         }
     }
 
-    private func loadAlertHistory() -> [AlertID: Date] {
+    private func loadAlertHistory() -> [AlertKey: Date] {
         guard let historyKey,
             let stored = UserDefaults.standard.dictionary(forKey: historyKey) as? [String: Double]
         else { return [:] }
         return stored.reduce(into: [:]) { result, entry in
-            if let id = AlertID(rawValue: entry.key) {
-                result[id] = Date(timeIntervalSince1970: entry.value)
+            if let key = AlertKey(storageKey: entry.key) {
+                result[key] = Date(timeIntervalSince1970: entry.value)
             }
         }
     }
 
-    private func loadAlertSeverities() -> [AlertID: AlertSeverity] {
+    private func loadAlertSeverities() -> [AlertKey: AlertSeverity] {
         guard let severitiesKey,
             let stored = UserDefaults.standard.dictionary(forKey: severitiesKey) as? [String: Int]
         else { return [:] }
         return stored.reduce(into: [:]) { result, entry in
-            if let id = AlertID(rawValue: entry.key),
+            if let key = AlertKey(storageKey: entry.key),
                 let severity = AlertSeverity(rawValue: entry.value)
             {
-                result[id] = severity
+                result[key] = severity
             }
         }
     }
 
-    private func saveAlertHistory(_ history: [AlertID: Date], severities: [AlertID: AlertSeverity])
-    {
+    private func saveAlertHistory(
+        _ history: [AlertKey: Date], severities: [AlertKey: AlertSeverity]
+    ) {
         guard let historyKey, let severitiesKey else { return }
         guard history != persistedHistory || severities != persistedSeverities else { return }
         persistedHistory = history
         persistedSeverities = severities
         let dates = history.reduce(into: [String: Double]()) { result, entry in
-            result[entry.key.rawValue] = entry.value.timeIntervalSince1970
+            result[entry.key.storageKey] = entry.value.timeIntervalSince1970
         }
         let levels = severities.reduce(into: [String: Int]()) { result, entry in
-            result[entry.key.rawValue] = entry.value.rawValue
+            result[entry.key.storageKey] = entry.value.rawValue
         }
         UserDefaults.standard.set(dates, forKey: historyKey)
         UserDefaults.standard.set(levels, forKey: severitiesKey)

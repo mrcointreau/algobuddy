@@ -1,7 +1,8 @@
 import Foundation
 
 public struct ChainPollerConfig: Sendable {
-    public var address: AlgorandAddress
+    /// The watched accounts, in the order the caller listed them.
+    public var addresses: [AlgorandAddress]
     public var accountInterval: TimeInterval = 30
     public var supplyInterval: TimeInterval = 300
     public var rewardsInterval: TimeInterval = 300
@@ -21,8 +22,13 @@ public struct ChainPollerConfig: Sendable {
     public var unreachableAfter: TimeInterval = 120
     public var params: ConsensusParams = .v40
 
+    public init(addresses: [AlgorandAddress]) {
+        self.addresses = addresses
+    }
+
+    /// Convenience for the one-account case, which is most of them.
     public init(address: AlgorandAddress) {
-        self.address = address
+        self.init(addresses: [address])
     }
 }
 
@@ -34,33 +40,51 @@ public struct PollFailure: Sendable, Equatable {
     public let message: String
 }
 
-/// Everything derivable about a participation account from public chain data,
-/// with no credentials and no access to the user's node.
+/// Everything derivable about a set of participation accounts from public chain
+/// data, with no credentials and no access to the user's node.
 ///
-/// Poll shape per cycle: one account fetch always; supply, challenge seed and
-/// rewards only when their own intervals lapse or the challenge window rolls.
-/// In the steady state that is a single request every 30 s.
+/// One poller watches every configured address rather than one poller each: the
+/// supply denominator and the challenge seed are the same for all of them, so
+/// separate pollers would fetch the same two values over and over and keep as
+/// many round clocks, backoffs and update streams as there are accounts.
+///
+/// Poll shape per cycle: one account fetch per address always; supply, challenge
+/// seed and rewards only when their own intervals lapse or the challenge window
+/// rolls. In the steady state that is one request per account every 30 s.
 public actor ChainPoller {
 
     public struct Update: Sendable {
         public let observedAt: Date
+        /// The furthest round any account was reported at. The accounts of one
+        /// cycle can answer a round apart, and the cycle's own clock takes the
+        /// freshest of them.
         public let currentRound: UInt64?
-        public let account: AccountState?
-        public let absence: AbsenceAssessment?
-        public let challenge: ChallengeState?
-        public let keyExpiry: KeyExpiry?
-        public let rewards: RewardsSummary?
+        /// One entry per watched address, in configured order.
+        public let entries: [AccountUpdate]
         public let roundTime: TimeInterval
         public let alerts: [HealthAlert]
         /// The subset of `alerts` that should raise a notification now.
         public let notifications: [HealthAlert]
+        /// The first thing that went wrong this cycle, whichever account or
+        /// shared stage it belonged to. An entry's own failure is on the entry.
         public let failure: PollFailure?
         /// Notification times, for the caller to persist so cooldowns survive a
         /// relaunch. See `AlertDispatcher.init(cooldown:lastNotified:lastSeverity:)`.
-        public let alertHistory: [AlertID: Date]
+        public let alertHistory: [AlertKey: Date]
         /// Severities at last evaluation, persisted with `alertHistory` so
         /// escalation detection survives a relaunch too.
-        public let alertSeverities: [AlertID: AlertSeverity]
+        public let alertSeverities: [AlertKey: AlertSeverity]
+
+        /// Whether any account was actually fetched. A cycle where none were
+        /// carries no figures at all, and its consumers keep the last update
+        /// that did on display.
+        public var hasData: Bool { entries.contains { $0.account != nil } }
+
+        /// What the entries amount to together. Derived on demand, since it is
+        /// a pure function of what is already here.
+        public var portfolio: PortfolioSummary {
+            PortfolioSummary(entries: entries, roundTime: roundTime)
+        }
     }
 
     private let config: ChainPollerConfig
@@ -71,16 +95,23 @@ public actor ChainPoller {
 
     private var roundClock = RoundClock()
     private var dispatcher: AlertDispatcher
-    private var rewardsTracker = RewardsTracker()
+
+    /// One account's proposal history. Kept per address because the
+    /// incremental refetch resumes from the newest round already cached, which
+    /// is a different round for every account.
+    private struct AccountRewards {
+        var tracker = RewardsTracker()
+        var fetchedAt: Date?
+        var isTruncated = false
+    }
+    private var rewards: [AlgorandAddress: AccountRewards] = [:]
 
     private var supply: LedgerSupply?
     private var supplyFetchedAt: Date?
     private var challengeSeed: Data?
     private var challengeSeedRound: UInt64?
-    private var rewardsFetchedAt: Date?
     private var failingSince: Date?
     private var consecutiveFailures = 0
-    private var rewardsTruncated = false
     private var isStopped = false
     private var pollTask: Task<Void, Never>?
     /// Whether dispatched notifications will actually be shown. When they will
@@ -219,48 +250,67 @@ public actor ChainPoller {
     @discardableResult
     public func pollOnce() async -> Update {
         let now = dates.now
-        let address = config.address.stringValue
+        let addresses = config.addresses
 
-        let account: AccountState
-        do {
-            account = try await algod.account(address)
-        } catch {
+        var accounts = [AlgorandAddress: AccountState]()
+        // Keyed by address, so a failure stays with the account it belongs to
+        // instead of standing for the whole cycle.
+        var failures = [AlgorandAddress: PollFailure]()
+        for (address, result) in await fetchAccounts(addresses) {
+            switch result {
+            case .success(let account):
+                accounts[address] = account
+            case .failure(let error):
+                failures[address] = PollFailure(stage: .account, message: describe(error))
+            }
+        }
+
+        // A cycle fails only when not one account could be fetched. One
+        // unreachable address degrades to that entry's own failure: the rest
+        // keep updating, the round still stands, and the shared backoff stays
+        // at the steady-state interval rather than punishing every account for
+        // one of them.
+        guard let round = accounts.values.map(\.round).max() else {
             consecutiveFailures += 1
             if failingSince == nil { failingSince = now }
-            return failedUpdate(
-                at: now,
-                failure: PollFailure(stage: .account, message: describe(error)))
+            return failedUpdate(at: now, failures: failures)
         }
 
         failingSince = nil
         consecutiveFailures = 0
-        let round = account.round
         roundClock.observe(round: round, at: now)
 
-        // The three remaining fetches depend only on the account fetch above
-        // and not on each other, so they overlap: a multi-fetch cycle pays for
-        // its slowest leg rather than the sum of the round trips.
+        // The remaining fetches depend only on the accounts above and not on
+        // each other, so they overlap: a multi-fetch cycle pays for its slowest
+        // leg rather than the sum of the round trips.
         let algod = self.algod
         let needSupply =
             supply == nil || elapsed(since: supplyFetchedAt, now: now) >= config.supplyInterval
         // The seed only changes when the challenge window rolls, so this is one
-        // request per interval (~47 minutes at nominal round time).
+        // request per interval (~47 minutes at nominal round time), however
+        // many accounts are watched.
         let challengeRound = Challenge.challengeRound(for: round, params: config.params)
         let seedRound = challengeRound != challengeSeedRound ? challengeRound : nil
-        let rewardsDue = elapsed(since: rewardsFetchedAt, now: now) >= config.rewardsInterval
         let windowRounds = UInt64(config.rewardsWindowDays * 86_400 / max(roundClock.estimate, 0.5))
         let windowStart = round > windowRounds ? round - windowRounds : 0
-        // Resume past what is already cached rather than re-downloading the
-        // whole window every cycle: blocks are immutable, so anything held
-        // cannot have changed, and a previously truncated fetch picks its tail
-        // back up from here.
-        let fetchFrom = max(windowStart, rewardsTracker.highestRound.map { $0 + 1 } ?? 0)
+        let rewardsRequests = addresses.filter { accounts[$0] != nil }
+            .compactMap { address -> ProposalRequest? in
+                let state = rewards[address] ?? AccountRewards()
+                guard elapsed(since: state.fetchedAt, now: now) >= config.rewardsInterval
+                else { return nil }
+                // Resume past what is already cached rather than
+                // re-downloading the whole window every cycle: blocks are
+                // immutable, so anything held cannot have changed, and a
+                // previously truncated fetch picks its tail back up from here.
+                return ProposalRequest(
+                    address: address,
+                    minRound: max(windowStart, state.tracker.highestRound.map { $0 + 1 } ?? 0))
+            }
 
         async let supplyFetch = Self.attempt(needSupply ? algod : nil) { try await $0.supply() }
         async let seedFetch = Self.attempt(seedRound) { try await algod.blockHeader($0) }
-        async let rewardsFetch = Self.attempt(rewardsDue ? indexer : nil) {
-            try await Self.fetchProposals(indexer: $0, address: address, minRound: fetchFrom)
-        }
+        async let rewardsFetches = Self.fetchProposals(
+            indexer: rewardsRequests.isEmpty ? nil : indexer, requests: rewardsRequests)
 
         var failure: PollFailure?
 
@@ -301,18 +351,43 @@ public actor ChainPoller {
             break
         }
 
-        switch await rewardsFetch {
-        case .success(let page):
-            rewardsTracker.ingest(page.blocks, windowStartRound: windowStart)
-            rewardsTruncated = page.truncated
-            rewardsFetchedAt = now
-        case .failure(let error):
-            failure = failure ?? PollFailure(stage: .rewards, message: describe(error))
-        case nil:
-            break
+        for (address, result) in await rewardsFetches {
+            switch result {
+            case .success(let page):
+                var state = rewards[address] ?? AccountRewards()
+                state.tracker.ingest(page.blocks, windowStartRound: windowStart)
+                state.isTruncated = page.truncated
+                state.fetchedAt = now
+                rewards[address] = state
+            case .failure(let error):
+                failures[address] = PollFailure(stage: .rewards, message: describe(error))
+            }
         }
 
-        return successUpdate(account: account, at: now, failure: failure)
+        return successUpdate(
+            accounts: accounts, failures: failures, round: round, at: now, failure: failure)
+    }
+
+    /// Fetches every watched account at once, so a cycle costs its slowest
+    /// account rather than the sum of them, and reports each address's outcome
+    /// on its own.
+    private func fetchAccounts(
+        _ addresses: [AlgorandAddress]
+    ) async -> [(AlgorandAddress, Result<AccountState, any Error>)] {
+        let algod = self.algod
+        return await withTaskGroup(of: (AlgorandAddress, Result<AccountState, any Error>).self) {
+            group in
+            for address in addresses {
+                group.addTask {
+                    do {
+                        return (address, .success(try await algod.account(address.stringValue)))
+                    } catch {
+                        return (address, .failure(error))
+                    }
+                }
+            }
+            return await group.reduce(into: []) { $0.append($1) }
+        }
     }
 
     /// Runs `operation` on `input` when it is non-nil, capturing the error
@@ -327,8 +402,50 @@ public actor ChainPoller {
 
     // MARK: - Derivation
 
-    private func successUpdate(account: AccountState, at now: Date, failure: PollFailure?) -> Update
-    {
+    private func successUpdate(
+        accounts: [AlgorandAddress: AccountState],
+        failures: [AlgorandAddress: PollFailure],
+        round: UInt64,
+        at now: Date,
+        failure: PollFailure?
+    ) -> Update {
+        var entries = [AccountUpdate]()
+        var alerts = [HealthAlert]()
+
+        for address in config.addresses {
+            guard let account = accounts[address] else {
+                // Nothing was learned about this account, so nothing is derived
+                // for it and no rule is run against figures from an earlier
+                // round. Its own failure says why the entry is bare.
+                entries.append(AccountUpdate(address: address, failure: failures[address]))
+                continue
+            }
+            let entry = derive(
+                address: address, account: account, failure: failures[address], now: now)
+            entries.append(entry)
+            alerts.append(contentsOf: engine.evaluate(snapshot(for: entry)))
+        }
+
+        let sorted = ordered(alerts)
+        return Update(
+            observedAt: now,
+            currentRound: round,
+            entries: entries,
+            roundTime: roundClock.estimate,
+            alerts: sorted,
+            notifications: dispatch(sorted, now: now),
+            // A shared stage that failed outranks an individual account's
+            // failure: it is the one that reaches every entry.
+            failure: failure ?? config.addresses.compactMap { failures[$0] }.first,
+            alertHistory: dispatcher.notificationHistory,
+            alertSeverities: dispatcher.severityHistory)
+    }
+
+    /// One account's share of the cycle, derived against the round that account
+    /// itself was reported at.
+    private func derive(
+        address: AlgorandAddress, account: AccountState, failure: PollFailure?, now: Date
+    ) -> AccountUpdate {
         let round = account.round
         // Absenteeism and challenges are protocol mechanisms that apply only to
         // Online accounts, so the gate lives here at derivation: every consumer
@@ -359,7 +476,7 @@ public actor ChainPoller {
             seedRound == Challenge.challengeRound(for: round, params: config.params)
         {
             challenge = Challenge.evaluate(
-                address: config.address,
+                address: address,
                 seed: seed,
                 challengeRound: seedRound,
                 currentRound: round,
@@ -367,36 +484,48 @@ public actor ChainPoller {
                 params: config.params)
         }
 
-        let keyExpiry = account.participation.map {
-            KeyExpiry(participation: $0, currentRound: round)
+        // Nil until the indexer has answered once for this account. Publishing
+        // the empty tracker before that would present "0 blocks, 0.00 ALGO" as
+        // real data while the rewards fetch is in fact failing or pending.
+        var rewardsSummary: RewardsSummary?
+        if let state = rewards[address], state.fetchedAt != nil {
+            rewardsSummary = state.tracker.summary(now: now)
+            rewardsSummary?.isTruncated = state.isTruncated
         }
 
-        let snapshot = Snapshot(
+        return AccountUpdate(
+            address: address,
+            account: account,
+            absence: absence,
+            challenge: challenge,
+            keyExpiry: account.participation.map {
+                KeyExpiry(participation: $0, currentRound: round)
+            },
+            rewards: rewardsSummary,
+            failure: failure)
+    }
+
+    private func snapshot(for entry: AccountUpdate) -> Snapshot {
+        Snapshot(
             roundTime: roundClock.estimate,
             params: config.params,
-            account: account,
-            absence: absence,
-            challenge: challenge,
-            keyExpiry: keyExpiry)
+            address: entry.address,
+            account: entry.account,
+            absence: entry.absence,
+            challenge: entry.challenge,
+            keyExpiry: entry.keyExpiry)
+    }
 
-        let alerts = engine.evaluate(snapshot)
-        return Update(
-            observedAt: now,
-            currentRound: round,
-            account: account,
-            absence: absence,
-            challenge: challenge,
-            keyExpiry: keyExpiry,
-            // Nil until the indexer has answered once. Publishing the empty
-            // tracker before that would present "0 blocks, 0.00 ALGO" as real
-            // data while the rewards fetch is in fact failing or pending.
-            rewards: rewardsFetchedAt == nil ? nil : rewardsSummary(now: now),
-            roundTime: roundClock.estimate,
-            alerts: alerts,
-            notifications: dispatch(alerts, now: now),
-            failure: failure,
-            alertHistory: dispatcher.notificationHistory,
-            alertSeverities: dispatcher.severityHistory)
+    /// Severity first, and within a severity the order the accounts are watched
+    /// in. Swift's sort is not stable, so without the second key equally severe
+    /// alerts could swap places between polls and read as something changing.
+    private func ordered(_ alerts: [HealthAlert]) -> [HealthAlert] {
+        alerts.enumerated()
+            .sorted {
+                $0.element.severity == $1.element.severity
+                    ? $0.offset < $1.offset : $0.element.severity > $1.element.severity
+            }
+            .map(\.element)
     }
 
     /// The dispatcher is consulted only when notifications will actually be
@@ -416,7 +545,7 @@ public actor ChainPoller {
     /// keeps its last data-bearing update on display and ages it from
     /// `observedAt`; the chain source itself is alerted on only after repeated
     /// failures.
-    private func failedUpdate(at now: Date, failure: PollFailure) -> Update {
+    private func failedUpdate(at now: Date, failures: [AlgorandAddress: PollFailure]) -> Update {
         var alerts = [HealthAlert]()
         let failingFor = failingSince.map { now.timeIntervalSince($0) } ?? 0
 
@@ -437,20 +566,59 @@ public actor ChainPoller {
         return Update(
             observedAt: now,
             currentRound: nil,
-            account: nil,
-            absence: nil,
-            challenge: nil,
-            keyExpiry: nil,
-            rewards: nil,
+            entries: config.addresses.map { AccountUpdate(address: $0, failure: failures[$0]) },
             roundTime: roundClock.estimate,
             alerts: alerts,
             notifications: dispatch(alerts, now: now),
-            failure: failure,
+            // Every account failed, so the first one's reason stands for the
+            // cycle. Repeating the same sentence per address would say nothing
+            // more about a source that is simply unreachable.
+            failure: config.addresses.compactMap { failures[$0] }.first,
             alertHistory: dispatcher.notificationHistory,
             alertSeverities: dispatcher.severityHistory)
     }
 
     // MARK: - Helpers
+
+    /// One account's proposal query for this cycle.
+    private struct ProposalRequest: Sendable {
+        let address: AlgorandAddress
+        let minRound: UInt64
+    }
+
+    private struct ProposalPage: Sendable {
+        let blocks: [IndexerClient.ProposedBlock]
+        /// The page budget was exhausted with results still outstanding.
+        let truncated: Bool
+    }
+
+    /// Runs every due account's proposal query at once, and reports each
+    /// address's outcome on its own so one indexer error cannot blank the
+    /// rewards of the accounts that answered.
+    ///
+    /// A nil indexer means rewards are not configured, or nothing is due.
+    private nonisolated static func fetchProposals(
+        indexer: IndexerClient?, requests: [ProposalRequest]
+    ) async -> [(AlgorandAddress, Result<ProposalPage, any Error>)] {
+        guard let indexer else { return [] }
+        return await withTaskGroup(of: (AlgorandAddress, Result<ProposalPage, any Error>).self) {
+            group in
+            for request in requests {
+                group.addTask {
+                    do {
+                        let page = try await fetchProposals(
+                            indexer: indexer,
+                            address: request.address.stringValue,
+                            minRound: request.minRound)
+                        return (request.address, .success(page))
+                    } catch {
+                        return (request.address, .failure(error))
+                    }
+                }
+            }
+            return await group.reduce(into: []) { $0.append($1) }
+        }
+    }
 
     /// - Returns: the proposals, and whether the page budget was exhausted with
     ///   results still outstanding.
@@ -458,7 +626,7 @@ public actor ChainPoller {
         indexer: IndexerClient,
         address: String,
         minRound: UInt64
-    ) async throws -> (blocks: [IndexerClient.ProposedBlock], truncated: Bool) {
+    ) async throws -> ProposalPage {
         // Results arrive oldest-first, so exhausting this budget drops the
         // *newest* proposals, the ones the 24h and 7d figures are made of.
         // 10 pages covers ~125 proposals a day, well past any account that
@@ -478,13 +646,7 @@ public actor ChainPoller {
 
         // A token still outstanding means recent proposals were never
         // fetched, so both figures are floors rather than merely incomplete.
-        return (collected, next != nil)
-    }
-
-    private func rewardsSummary(now: Date) -> RewardsSummary {
-        var summary = rewardsTracker.summary(now: now)
-        summary.isTruncated = rewardsTruncated
-        return summary
+        return ProposalPage(blocks: collected, truncated: next != nil)
     }
 
     private func elapsed(since date: Date?, now: Date) -> TimeInterval {

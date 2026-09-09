@@ -24,6 +24,17 @@ final class TestClock: DateProviding, @unchecked Sendable {
     }
 }
 
+extension ChainPoller.Update {
+    /// The entry of a poller configured with a single address. Spelling out
+    /// `entries.first` at every assertion would bury what is being checked.
+    var only: AccountUpdate? { entries.first }
+
+    /// The entry for one of several watched addresses.
+    func entry(for address: AlgorandAddress) -> AccountUpdate? {
+        entries.first { $0.address == address }
+    }
+}
+
 /// Routes requests by URL substring and records what was asked for, so tests can
 /// assert on request *counts*: the difference between "fetches the challenge
 /// seed once per window" and "fetches it every poll" is invisible otherwise.

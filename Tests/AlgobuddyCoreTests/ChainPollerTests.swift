@@ -61,12 +61,12 @@ struct ChainPollerTests {
 
         #expect(update.failure == nil)
         #expect(update.currentRound == 64_030_100)
-        #expect(update.account?.status == .online)
-        #expect(update.absence != nil)
-        #expect(update.challenge != nil)
-        #expect(update.keyExpiry?.lastValid == 66_085_593)
+        #expect(update.only?.account?.status == .online)
+        #expect(update.only?.absence != nil)
+        #expect(update.only?.challenge != nil)
+        #expect(update.only?.keyExpiry?.lastValid == 66_085_593)
         // Absence uses the live online stake as its denominator.
-        #expect(update.absence?.allowableLag == 252_022)
+        #expect(update.only?.absence?.allowableLag == 252_022)
     }
 
     @Test("a healthy account raises no alerts")
@@ -89,7 +89,7 @@ struct ChainPollerTests {
         standardRoutes(stub, round: 64_030_160, seed: matchingSeed, lastSeen: 64_029_500)
         let update = await makePoller(stub: stub, clock: clock).pollOnce()
 
-        #expect(update.challenge?.isFailing == true)
+        #expect(update.only?.challenge?.isFailing == true)
         let alert = update.alerts.first { $0.id == .challengeFailing }
         #expect(alert?.severity == .critical)
         #expect(update.notifications.contains { $0.id == .challengeFailing })
@@ -167,8 +167,8 @@ struct ChainPollerTests {
         let bad = await poller.pollOnce()
 
         #expect(bad.failure?.stage == .account)
-        #expect(bad.account == nil)
-        #expect(bad.challenge == nil)
+        #expect(bad.only?.account == nil)
+        #expect(bad.only?.challenge == nil)
         #expect(!bad.alerts.contains { $0.id == .challengeFailing })
     }
 
@@ -205,6 +205,9 @@ struct ChainPollerTests {
         let alert = update.alerts.first { $0.id == .chainSourceUnreachable }
         #expect(alert?.severity == .warning)
         #expect(alert?.body.contains("minutes") == true)
+        // The source is the watch's, not one account's, so this alert holds
+        // under no address.
+        #expect(alert?.address == nil)
     }
 
     @Test("recovery resets the outage clock")
@@ -243,7 +246,7 @@ struct ChainPollerTests {
 
         var config = ChainPollerConfig(address: address)
         config.accountInterval = 30
-        func build(history: [AlertID: Date]) -> ChainPoller {
+        func build(history: [AlertKey: Date]) -> ChainPoller {
             ChainPoller(
                 config: config,
                 algod: AlgodClient(baseURL: URL(string: "https://chain.example")!, fetcher: stub),
@@ -259,7 +262,9 @@ struct ChainPollerTests {
         let notified = await first.pollOnce()
         #expect(notified.notifications.contains { $0.id == .chainSourceUnreachable })
         let history = notified.alertHistory
-        #expect(history[.chainSourceUnreachable] != nil)
+        // The outage is about the watch rather than about one account, so it
+        // holds under no address.
+        #expect(history[AlertKey(address: nil, id: .chainSourceUnreachable)] != nil)
 
         // Relaunch: same outage, cooldown carried across.
         clock.advance(60)
@@ -313,10 +318,10 @@ struct ChainPollerTests {
 
         let update = await makePoller(stub: stub, clock: clock).pollOnce()
 
-        #expect(update.account != nil)  // the cycle still succeeded
+        #expect(update.only?.account != nil)  // the cycle still succeeded
         #expect(update.failure?.stage == .supply)
-        #expect(update.absence == nil)  // no denominator yet, so no guess
-        #expect(update.challenge != nil)
+        #expect(update.only?.absence == nil)  // no denominator yet, so no guess
+        #expect(update.only?.challenge != nil)
     }
 
     @Test("a mistyped address reports not-found rather than a generic error")
@@ -345,7 +350,7 @@ struct ChainPollerTests {
         let poller = makePoller(stub: stub, clock: clock)
 
         let first = await poller.pollOnce()
-        #expect(first.challenge?.isFailing == true)  // genuinely failing, this window
+        #expect(first.only?.challenge?.isFailing == true)  // genuinely failing, this window
 
         // Cross into window 64,035,000, but the header fetch fails.
         standardRoutes(stub, round: 64_035_400, seed: matchingSeed, lastSeen: 64_033_000)
@@ -355,7 +360,7 @@ struct ChainPollerTests {
 
         #expect(second.failure?.stage == .challengeSeed)
         // No challenge state at all, rather than one derived from the old window.
-        #expect(second.challenge == nil)
+        #expect(second.only?.challenge == nil)
         #expect(!second.alerts.contains { $0.id == .challengeFailing })
     }
 
@@ -423,7 +428,7 @@ struct ChainPollerTests {
 
         let first = await poller.pollOnce()
         #expect(first.failure?.stage == .challengeSeed)
-        #expect(first.challenge == nil)
+        #expect(first.only?.challenge == nil)
 
         clock.advance(30)
         _ = await poller.pollOnce()
@@ -442,7 +447,7 @@ struct ChainPollerTests {
         let poller = makePoller(stub: stub, clock: clock, withIndexer: true)
 
         let failing = await poller.pollOnce()
-        #expect(failing.rewards == nil)
+        #expect(failing.only?.rewards == nil)
         #expect(failing.failure?.stage == .rewards)
 
         stub.route(
@@ -452,8 +457,8 @@ struct ChainPollerTests {
                 proposer: Self.addressString))
         clock.advance(30)
         let recovered = await poller.pollOnce()
-        #expect(recovered.rewards != nil)
-        #expect(recovered.rewards?.proposals24h == 1)
+        #expect(recovered.only?.rewards != nil)
+        #expect(recovered.only?.rewards?.proposals24h == 1)
     }
 
     /// Blocks are immutable, so the second rewards fetch resumes past what is
@@ -519,7 +524,7 @@ struct ChainPollerTests {
                 ], proposer: Self.addressString))
 
         let update = await makePoller(stub: stub, clock: clock, withIndexer: true).pollOnce()
-        let rewards = try #require(update.rewards)
+        let rewards = try #require(update.only?.rewards)
 
         #expect(rewards.proposals24h == 1)
         #expect(rewards.proposals7d == 3)
@@ -562,7 +567,7 @@ struct ChainPollerTests {
 
         let update = await makePoller(stub: stub, clock: clock, withIndexer: true).pollOnce()
 
-        #expect(update.rewards?.isTruncated == true)
+        #expect(update.only?.rewards?.isTruncated == true)
         #expect(stub.requestCount(containing: "/v2/block-headers") == 10)  // the page budget
     }
 
@@ -573,7 +578,7 @@ struct ChainPollerTests {
         standardRoutes(stub, seed: nonMatchingSeed)
         stub.route("/v2/block-headers", json: "{\"blocks\":[]}")
         let update = await makePoller(stub: stub, clock: clock, withIndexer: true).pollOnce()
-        #expect(update.rewards?.isTruncated == false)
+        #expect(update.only?.rewards?.isTruncated == false)
     }
 
     @Test("rewards are omitted entirely when no indexer is configured")
@@ -582,7 +587,7 @@ struct ChainPollerTests {
         let clock = TestClock()
         standardRoutes(stub, seed: nonMatchingSeed)
         let update = await makePoller(stub: stub, clock: clock).pollOnce()
-        #expect(update.rewards == nil)
+        #expect(update.only?.rewards == nil)
         #expect(stub.requestCount(containing: "block-headers") == 0)
     }
 
@@ -627,6 +632,215 @@ struct ChainPollerTests {
         #expect(received?.currentRound == 64_030_100)
     }
 
+    // MARK: - Several accounts
+
+    /// A further valid address, derived rather than written out, so a second
+    /// account costs no more 58-character literals and the checksum still holds.
+    static func filledAddress(_ byte: UInt8) -> AlgorandAddress {
+        let key = [UInt8](repeating: byte, count: AlgorandAddress.publicKeyLength)
+        return try! AlgorandAddress(
+            Base32.encode(key + SHA512_256.hash(key).suffix(AlgorandAddress.checksumLength)))
+    }
+
+    func makePoller(
+        stub: StubFetcher,
+        clock: TestClock,
+        addresses: [AlgorandAddress],
+        withIndexer: Bool = false
+    ) -> ChainPoller {
+        var config = ChainPollerConfig(addresses: addresses)
+        config.accountInterval = 30
+        config.supplyInterval = 300
+        config.rewardsInterval = 300
+        return ChainPoller(
+            config: config,
+            algod: AlgodClient(
+                baseURL: URL(string: "https://chain.example")!, token: nil, fetcher: stub),
+            indexer: withIndexer
+                ? IndexerClient(baseURL: URL(string: "https://idx.example")!, fetcher: stub)
+                : nil,
+            dates: clock)
+    }
+
+    /// One account's route, matched on its own address so each watched account
+    /// can answer differently.
+    func accountRoute(
+        _ stub: StubFetcher,
+        _ address: AlgorandAddress,
+        round: UInt64 = 64_030_100,
+        status: String = "Online",
+        lastSeen: UInt64 = 64_030_050
+    ) {
+        stub.route(
+            "/v2/accounts/\(address.stringValue)",
+            json: JSONBuilder.account(
+                address: address.stringValue, round: round, status: status,
+                lastProposed: lastSeen, lastHeartbeat: lastSeen - 1_000,
+                voteFirstValid: 63_308_451, voteLastValid: 66_085_593))
+    }
+
+    /// The supply denominator and the challenge seed, which every watched
+    /// account shares.
+    func sharedRoutes(_ stub: StubFetcher, round: UInt64 = 64_030_100) {
+        stub.route("/v2/ledger/supply", json: JSONBuilder.supply(round: round))
+        stub.route(
+            "/v2/blocks/", json: JSONBuilder.blockHeader(round: 64_030_000, seed: nonMatchingSeed))
+    }
+
+    @Test("a cycle produces one entry per watched address")
+    func entryPerAddress() async throws {
+        let stub = StubFetcher()
+        let clock = TestClock()
+        let second = Self.filledAddress(0x11)
+        accountRoute(stub, address)
+        accountRoute(stub, second)
+        sharedRoutes(stub)
+
+        let update = await makePoller(stub: stub, clock: clock, addresses: [address, second])
+            .pollOnce()
+
+        #expect(update.entries.map(\.address) == [address, second])
+        #expect(update.entries.allSatisfy { $0.account != nil })
+        #expect(update.entries.allSatisfy { $0.absence != nil })
+        #expect(update.entries.allSatisfy { $0.keyExpiry != nil })
+        #expect(update.failure == nil)
+        // The denominator and the seed are shared, so a second account costs one
+        // more request rather than three.
+        #expect(stub.requestCount(containing: "/v2/accounts/") == 2)
+        #expect(stub.requestCount(containing: "/v2/ledger/supply") == 1)
+        #expect(stub.requestCount(containing: "/v2/blocks/") == 1)
+    }
+
+    /// One address that cannot be fetched must not stop the others being
+    /// watched, nor slow the whole cycle down to a backoff.
+    @Test("one unreachable address degrades only its own entry")
+    func oneAddressDegrades() async throws {
+        let stub = StubFetcher()
+        let clock = TestClock()
+        let second = Self.filledAddress(0x11)
+        accountRoute(stub, address)  // the second address has no route, so it 404s
+        sharedRoutes(stub)
+        let poller = makePoller(stub: stub, clock: clock, addresses: [address, second])
+
+        let update = await poller.pollOnce()
+
+        #expect(update.entry(for: address)?.account != nil)
+        #expect(update.entry(for: address)?.failure == nil)
+        #expect(update.entry(for: second)?.account == nil)
+        #expect(update.entry(for: second)?.failure?.stage == .account)
+        // The cycle still carries data, and its round still stands.
+        #expect(update.hasData)
+        #expect(update.currentRound == 64_030_100)
+        #expect(await poller.nextDelay == 30)
+    }
+
+    @Test("a cycle fails only when no account could be fetched")
+    func everyAddressFails() async throws {
+        let stub = StubFetcher()
+        let clock = TestClock()
+        let second = Self.filledAddress(0x11)
+        stub.setFailing(true)
+        let poller = makePoller(stub: stub, clock: clock, addresses: [address, second])
+
+        let update = await poller.pollOnce()
+
+        #expect(!update.hasData)
+        #expect(update.entries.count == 2)
+        #expect(update.entries.allSatisfy { $0.failure?.stage == .account })
+        #expect(update.failure?.stage == .account)
+        #expect(await poller.nextDelay == 5)  // now the shared backoff engages
+    }
+
+    /// Cooldowns are held per account as well as per rule. Keyed on the rule
+    /// alone, the first account to notify would silence every other account's
+    /// first alert of the same kind for the whole cooldown.
+    @Test("one account's cooldown cannot silence another's first alert")
+    func cooldownsAreIndependentPerAccount() async throws {
+        let stub = StubFetcher()
+        let clock = TestClock()
+        let second = Self.filledAddress(0x11)
+        accountRoute(stub, address, status: "Offline")
+        accountRoute(stub, second)
+        sharedRoutes(stub)
+        let poller = makePoller(stub: stub, clock: clock, addresses: [address, second])
+
+        let first = await poller.pollOnce()
+        #expect(first.notifications.map(\.address) == [address])
+
+        // The second account goes offline half a minute later, far inside the
+        // 15-minute cooldown the first account's notification started.
+        accountRoute(stub, second, status: "Offline")
+        clock.advance(30)
+        let update = await poller.pollOnce()
+
+        #expect(update.notifications.map(\.address) == [second])
+        #expect(update.alerts.count == 2)  // both conditions still hold
+        #expect(update.alerts.allSatisfy { $0.id == .accountOffline })
+    }
+
+    /// Blocks are immutable, so each account resumes from the newest round
+    /// already cached for it, which is a different round for every account.
+    @Test("each account's rewards query resumes from its own cached round")
+    func rewardsResumePerAddress() async throws {
+        let stub = StubFetcher()
+        let clock = TestClock()
+        let second = Self.filledAddress(0x11)
+        accountRoute(stub, address)
+        accountRoute(stub, second)
+        sharedRoutes(stub)
+        let nowSeconds = Int64(clock.now.timeIntervalSince1970)
+        stub.route(
+            "proposers=\(Self.addressString)",
+            json: JSONBuilder.blockHeaders(
+                [(round: 64_029_000, timestamp: nowSeconds - 3_600, payout: 8_000_000)],
+                proposer: Self.addressString))
+        stub.route(
+            "proposers=\(second.stringValue)",
+            json: JSONBuilder.blockHeaders(
+                [(round: 64_028_000, timestamp: nowSeconds - 3_600, payout: 5_000_000)],
+                proposer: second.stringValue))
+        let poller = makePoller(
+            stub: stub, clock: clock, addresses: [address, second], withIndexer: true)
+
+        let first = await poller.pollOnce()
+        #expect(first.entry(for: address)?.rewards?.earned24h == MicroAlgos(8_000_000))
+        #expect(first.entry(for: second)?.rewards?.earned24h == MicroAlgos(5_000_000))
+        #expect(first.portfolio.earned24h == MicroAlgos(13_000_000))
+
+        clock.advance(301)
+        _ = await poller.pollOnce()
+
+        let calls = stub.requests.filter { $0.contains("/v2/block-headers") }
+        #expect(calls.count == 4)
+        #expect(
+            calls.contains {
+                $0.contains("proposers=\(Self.addressString)") && $0.contains("min-round=64029001")
+            })
+        #expect(
+            calls.contains {
+                $0.contains("proposers=\(second.stringValue)")
+                    && $0.contains("min-round=64028001")
+            })
+    }
+
+    /// The one-account case is the common one, and it must behave exactly as it
+    /// did before several were possible.
+    @Test("a single address produces exactly one entry")
+    func singleAddressIsOneEntry() async throws {
+        let stub = StubFetcher()
+        let clock = TestClock()
+        standardRoutes(stub, seed: nonMatchingSeed)
+
+        let update = await makePoller(stub: stub, clock: clock).pollOnce()
+
+        #expect(update.entries.count == 1)
+        #expect(update.only?.address == address)
+        #expect(update.hasData)
+        #expect(update.portfolio.accountCount == 1)
+        #expect(update.portfolio.onlineAccounts == 1)
+        #expect(stub.requestCount(containing: "/v2/accounts/") == 1)
+    }
+
     // MARK: - Real captured data
 
     @Test("runs end to end against captured mainnet responses")
@@ -640,13 +854,13 @@ struct ChainPollerTests {
         let update = await makePoller(stub: stub, clock: clock).pollOnce()
 
         #expect(update.failure == nil)
-        #expect(update.account?.status == .online)
-        #expect(update.account?.incentiveEligible == true)
-        #expect(update.absence?.isAbsent == false)
-        #expect(update.keyExpiry?.hasExpired == false)
+        #expect(update.only?.account?.status == .online)
+        #expect(update.only?.account?.incentiveEligible == true)
+        #expect(update.only?.absence?.isAbsent == false)
+        #expect(update.only?.keyExpiry?.hasExpired == false)
         // The captured round sits 781 past its challenge round, beyond the
         // 2x-grace enforcement bound, so protocol-correct evaluation is nil.
-        #expect(update.challenge == nil)
+        #expect(update.only?.challenge == nil)
         // A healthy, eligible, well-funded account should be quiet.
         #expect(update.alerts.isEmpty)
     }

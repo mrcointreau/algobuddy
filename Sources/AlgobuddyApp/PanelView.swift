@@ -25,7 +25,7 @@ struct PanelView: View {
         header
         Divider()
 
-        if let update = model.display, let account = update.account {
+        if let update = model.display, let entry = model.displayEntry, let account = entry.account {
             // Unscrolled for the same reason as SettingsView. Content here does
             // vary (the alert list grows), so the window grows with it. A taller
             // panel when several alerts hold reads far better than a short one
@@ -33,8 +33,8 @@ struct PanelView: View {
             // Spacing separates the groups. Dividers are reserved for the
             // structural split between the panel's chrome and its content.
             VStack(alignment: .leading, spacing: Spacing.group) {
-                AccountCard(update: update, account: account)
-                if let rewards = update.rewards {
+                AccountCard(update: update, entry: entry, account: account)
+                if let rewards = entry.rewards {
                     RewardsCard(rewards: rewards)
                 }
                 // visibleAlerts, not this update's own list: during an outage
@@ -351,7 +351,11 @@ struct MenuRowLabel: View {
 // MARK: - Cards
 
 struct AccountCard: View {
+    /// The cycle, for the round and the round time it shares with every
+    /// account, and for the alerts it evaluated.
     let update: ChainPoller.Update
+    /// This account's share of that cycle.
+    let entry: AccountUpdate
     let account: AccountState
     @Environment(\.valuesHidden) private var isHidden
 
@@ -367,7 +371,7 @@ struct AccountCard: View {
                     .font(Typography.primary.monospacedDigit())
             }
 
-            if let expiry = update.keyExpiry {
+            if let expiry = entry.keyExpiry {
                 MeterRow(
                     title: "Participation keys",
                     detail: Format.duration(expiry.timeRemaining(roundTime: update.roundTime)),
@@ -383,14 +387,14 @@ struct AccountCard: View {
             // account the headroom runs to weeks and saying so every poll is
             // noise. The poller derives absence only for Online accounts, so no
             // status check is needed here.
-            if let absence = update.absence, absence.ratio > 0.25 {
+            if let absence = entry.absence, absence.ratio > 0.25 {
                 ValueRow(
                     title: "Absence headroom",
                     detail: Format.duration(absence.headroom(roundTime: update.roundTime)),
                     level: level(for: .absenceHeadroom))
             }
 
-            if let challenge = update.challenge {
+            if let challenge = entry.challenge {
                 ChallengeRow(
                     challenge: challenge,
                     roundTime: update.roundTime,
@@ -430,9 +434,10 @@ struct AccountCard: View {
     /// Meter severity is read back from the alerts the engine already produced,
     /// rather than re-deriving thresholds here. Hardcoding the ratios in SwiftUI
     /// would duplicate `AlertThresholds`, so a meter could disagree with its own
-    /// notification.
+    /// notification. Matched on the account as well as the rule, so a meter can
+    /// only ever be coloured by an alert about the account it belongs to.
     private func level(for id: AlertID) -> MeterLevel {
-        MeterLevel(update.alerts.first(where: { $0.id == id })?.severity)
+        MeterLevel(update.alerts.first { $0.id == id && $0.address == entry.address }?.severity)
     }
 }
 

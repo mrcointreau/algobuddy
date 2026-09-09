@@ -28,17 +28,75 @@ public func quantity(_ value: Double, _ unit: String, decimals: Int = 0) -> Stri
     return text == "1" ? "\(text) \(unit)" : "\(text) \(unit)s"
 }
 
+/// What a cooldown is held against: the rule, and the account it holds for.
+///
+/// Both halves are needed. Several accounts can be watched at once and every
+/// rule applies to each of them, so keying on the rule alone would let one
+/// account's notification silence another account's first alert of the same
+/// kind for the whole cooldown.
+public struct AlertKey: Hashable, Sendable {
+    /// Nil for the alerts that are about the watch itself rather than about one
+    /// account, such as the chain data source being unreachable.
+    public let address: AlgorandAddress?
+    public let id: AlertID
+
+    public init(address: AlgorandAddress?, id: AlertID) {
+        self.address = address
+        self.id = id
+    }
+
+    /// The key as a single string, for callers that persist cooldowns in a
+    /// store with string keys. `init(storageKey:)` reads it back. The separator
+    /// appears in neither half: an address is base32 and a rule name is
+    /// alphanumeric.
+    public var storageKey: String { "\(address?.stringValue ?? "")|\(id.rawValue)" }
+
+    /// Nil when the string was not written by `storageKey`, or names a rule or
+    /// an address this version cannot make sense of. A cooldown that cannot be
+    /// read is dropped rather than guessed at, which at worst re-announces a
+    /// condition that still holds.
+    public init?(storageKey: String) {
+        let parts = storageKey.split(separator: "|", omittingEmptySubsequences: false)
+        guard parts.count == 2, let id = AlertID(rawValue: String(parts[1])) else { return nil }
+        if parts[0].isEmpty {
+            self.init(address: nil, id: id)
+        } else if let address = try? AlgorandAddress(String(parts[0])) {
+            self.init(address: address, id: id)
+        } else {
+            return nil
+        }
+    }
+}
+
 public struct HealthAlert: Sendable, Equatable, Identifiable {
     public let id: AlertID
+    /// The account the alert holds for, nil when it is about the watch itself.
+    public let address: AlgorandAddress?
     public let severity: AlertSeverity
     public let title: String
     public let body: String
 
-    public init(id: AlertID, severity: AlertSeverity, title: String, body: String) {
+    public init(
+        id: AlertID,
+        address: AlgorandAddress? = nil,
+        severity: AlertSeverity,
+        title: String,
+        body: String
+    ) {
         self.id = id
+        self.address = address
         self.severity = severity
         self.title = title
         self.body = body
+    }
+
+    public var key: AlertKey { AlertKey(address: address, id: id) }
+
+    /// The same alert, attributed to an account. The rules derive alerts from
+    /// thresholds alone, so the account is attached once on the way out rather
+    /// than repeated at every construction site.
+    func held(for address: AlgorandAddress?) -> HealthAlert {
+        HealthAlert(id: id, address: address, severity: severity, title: title, body: body)
     }
 }
 
@@ -49,6 +107,9 @@ public struct HealthAlert: Sendable, Equatable, Identifiable {
 public struct Snapshot: Sendable {
     public var roundTime: TimeInterval
     public var params: ConsensusParams
+    /// The account the snapshot describes. Every alert it produces is stamped
+    /// with this, so the cooldowns of one watched account stay its own.
+    public var address: AlgorandAddress?
     public var account: AccountState?
     public var absence: AbsenceAssessment?
     public var challenge: ChallengeState?
@@ -57,6 +118,7 @@ public struct Snapshot: Sendable {
     public init(
         roundTime: TimeInterval = 2.8,
         params: ConsensusParams = .v40,
+        address: AlgorandAddress? = nil,
         account: AccountState? = nil,
         absence: AbsenceAssessment? = nil,
         challenge: ChallengeState? = nil,
@@ -64,6 +126,7 @@ public struct Snapshot: Sendable {
     ) {
         self.roundTime = roundTime
         self.params = params
+        self.address = address
         self.account = account
         self.absence = absence
         self.challenge = challenge
@@ -105,7 +168,7 @@ public struct AlertEngine: Sendable {
     public func evaluate(_ snapshot: Snapshot) -> [HealthAlert] {
         var alerts = [HealthAlert]()
         alerts.append(contentsOf: participationAlerts(snapshot))
-        return alerts.sorted { $0.severity > $1.severity }
+        return alerts.map { $0.held(for: snapshot.address) }.sorted { $0.severity > $1.severity }
     }
 
     /// Every alert follows one shape: the title names the condition, and the body states the

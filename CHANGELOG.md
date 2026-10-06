@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.2.0](https://github.com/mrcointreau/algobuddy/compare/v1.1.0...v1.2.0) (2026-10-06)
+
+
+### Features
+
+* **app:** present a portfolio of accounts in panel and menu bar ([#16](https://github.com/mrcointreau/algobuddy/issues/16)) ([31907db](https://github.com/mrcointreau/algobuddy/commit/31907dbe20f6326bf2fa02058ac8f67ec65b3751))
+* **app:** watch several accounts from Settings and the panel ([#17](https://github.com/mrcointreau/algobuddy/issues/17)) ([02472a7](https://github.com/mrcointreau/algobuddy/commit/02472a7471493640acbcabcdad777bac4d60ea96))
+* **core:** watch multiple addresses in one poller ([#14](https://github.com/mrcointreau/algobuddy/issues/14)) ([a111c06](https://github.com/mrcointreau/algobuddy/commit/a111c06fd91e9a46eab13ee0ae3cb2c9af0f5089))
+
 ## [1.1.0](https://github.com/mrcointreau/algobuddy/compare/v1.0.1...v1.1.0) (2026-08-21)
 
 

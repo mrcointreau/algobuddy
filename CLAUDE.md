@@ -1,10 +1,10 @@
 # Working in this repository
 
-algobuddy is a macOS menu bar app that watches an Algorand participation account from public chain data alone. It holds no credentials, contacts only the configured algod and indexer endpoints, and its value rests on being simple enough to read and trust. Keep changes small, verified, and in that spirit.
+algobuddy is a macOS menu bar app that watches one or more Algorand participation accounts from public chain data alone. It holds no credentials, monitors through the configured algod and indexer endpoints only, and contacts GitHub only when the user clicks Check for Updates. Its value rests on being simple enough to read and trust. Keep changes small, verified, and in that spirit.
 
 ## Layout
 
-- `Sources/AlgobuddyCore` is a pure library, Foundation only, no Apple UI frameworks. All 108 tests live in `Tests/AlgobuddyCoreTests` and exercise it. This is where logic changes belong, and where they can be fully verified.
+- `Sources/AlgobuddyCore` is a pure library, Foundation only, no Apple UI frameworks. All the tests live in `Tests/AlgobuddyCoreTests` and exercise it. This is where logic changes belong, and where they can be fully verified.
 - `Sources/AlgobuddyApp` is the SwiftUI and AppKit layer. It compiles but has no automated tests, so treat changes here as unverified beyond a clean build.
 
 ## The gate
@@ -32,6 +32,6 @@ Prefer changes to `Sources/AlgobuddyCore`, its tests, and documentation, where t
 
 - the release pipeline (`.github/workflows/`, `release-please-config.json`, the manifest),
 - the version stamping in the `Makefile` or `Resources/Info.plist`,
-- the security posture: the "no credentials, two configured hosts, nothing stored" claims in `SECURITY.md` and `README.md` must stay true of the code.
+- the security posture: the "no credentials, monitoring through two configured hosts, nothing secret stored" claims in `SECURITY.md` and `README.md` must stay true of the code.
 
 When a change would affect any of those, say so and stop rather than guessing.

@@ -72,7 +72,9 @@ jobs:
             {"outputStyle": "Concise"}
           # The model is pinned because the action's runtime otherwise falls
           # back to its own default, a smaller model than feature work here
-          # deserves, rather than to the account default.
+          # deserves, rather than to the account default. The effort level is
+          # pinned too, because each model has its own default level, and a
+          # model change would otherwise alter the depth of every run.
           #
           # Bash is off by default in this action. The make/swift allowances let
           # the agent run its own `make check` before proposing a change, and
@@ -83,6 +85,7 @@ jobs:
           # The turn limit is a cost ceiling sized for feature work; a run that
           # hits it fails visibly rather than silently truncating.
           claude_args: |
-            --model claude-opus-5
+            --model claude-opus-5-5
+            --effort high
             --max-turns 120
             --allowedTools "Bash(make:*),Bash(swift:*),Bash(git status:*),Bash(git diff:*),Bash(git log:*),Edit,MultiEdit,Read,Write,Glob,Grep"

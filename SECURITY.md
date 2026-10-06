@@ -16,7 +16,7 @@ This section is unusually short, and that is the point.
 
 **No signing.** It holds no spending key, constructs no transaction, and submits nothing to the network. Nothing it does can move funds or change your account's participation state.
 
-**One public address.** The only thing you give it is an Algorand address, which is public information already recorded on chain.
+**Public addresses only.** The only things you give it are Algorand addresses, which are public information already recorded on chain.
 
 ### What it talks to
 
@@ -31,7 +31,7 @@ No telemetry, no analytics, no crash reporting, and no third-party SDKs. The `de
 
 ### The one privacy trade
 
-By default those endpoints are a public API provider. That provider can see which address you watch and how often you poll. This is stated in the Settings pane rather than buried here, and both URLs are editable, so anyone who minds can point algobuddy at an algod they control.
+By default those endpoints are a public API provider. That provider can see which addresses you watch and how often you poll. This is stated in the Settings pane rather than buried here, and both URLs are editable, so anyone who minds can point algobuddy at an algod they control.
 
 ### Verifying it
 

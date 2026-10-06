@@ -234,4 +234,45 @@ struct AlertEngineTests {
         #expect(alerts.first?.severity == .critical)
         #expect(zip(alerts, alerts.dropFirst()).allSatisfy { $0.severity >= $1.severity })
     }
+
+    // MARK: - One account's alerts
+
+    func alert(_ id: AlertID, for address: AlgorandAddress?) -> HealthAlert {
+        HealthAlert(id: id, address: address, severity: .warning, title: "", body: "")
+    }
+
+    var watched: (first: AlgorandAddress, second: AlgorandAddress) {
+        let keys = ([UInt8](repeating: 0x11, count: 32), [UInt8](repeating: 0x22, count: 32))
+        func address(_ key: [UInt8]) -> AlgorandAddress {
+            try! AlgorandAddress(Base32.encode(key + SHA512_256.hash(key).suffix(4)))
+        }
+        return (address(keys.0), address(keys.1))
+    }
+
+    @Test("an account's own alerts leave out every other account's")
+    func ownAlertsOnly() {
+        let (first, second) = watched
+        let alerts = [
+            alert(.keyExpiry, for: first), alert(.accountOffline, for: second),
+            alert(.chainSourceUnreachable, for: nil),
+        ]
+
+        #expect(alerts.about(first, includingWatchAlerts: false).map(\.id) == [.keyExpiry])
+    }
+
+    /// A source outage holds for every account at once, so a page about any
+    /// one of them must still say so.
+    @Test("watch alerts are included only when asked for")
+    func watchAlertsOnRequest() {
+        let (first, second) = watched
+        let alerts = [
+            alert(.chainSourceUnreachable, for: nil), alert(.keyExpiry, for: first),
+            alert(.accountOffline, for: second),
+        ]
+
+        #expect(
+            alerts.about(first, includingWatchAlerts: true).map(\.id)
+                == [.chainSourceUnreachable, .keyExpiry])
+        #expect(alerts.about(second, includingWatchAlerts: false).map(\.id) == [.accountOffline])
+    }
 }

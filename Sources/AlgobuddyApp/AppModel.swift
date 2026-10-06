@@ -12,12 +12,29 @@ import UserNotifications
 ///     log stream --predicate 'subsystem == "dev.algobuddy.app"' --level debug
 let log = Logger(subsystem: "dev.algobuddy.app", category: "app")
 
+/// One row of the Account list, as the user is editing it.
+///
+/// Identified by a token rather than by its text: two rows hold the same
+/// characters while one is being typed into, and rows identified by content
+/// would collapse into each other or swap places mid-edit, taking the keyboard
+/// focus with them.
+struct AddressDraft: Identifiable {
+    let id = UUID()
+    var text = ""
+}
+
 @MainActor
 @Observable
 final class AppModel {
     // Persisted settings. Views mutate these freely and call `apply()` on commit,
     // rather than restarting the poller on every keystroke.
-    var addressText = ""
+
+    /// The watched addresses, in the order every surface presents them.
+    ///
+    /// Never empty: onboarding and Settings both need a row to type into, so
+    /// removing the last one leaves a blank row rather than nothing. A blank
+    /// row watches nothing, which is how "no account" is expressed.
+    var addressDrafts = [AddressDraft()]
 
     /// Replaces the account's address and its ALGO figures with bullets in the
     /// panel and the menu bar, for screen sharing, screenshots, or simply not
@@ -49,11 +66,16 @@ final class AppModel {
     /// otherwise the last one that did.
     var display: ChainPoller.Update? { update?.hasData == true ? update : lastData }
 
-    /// How many accounts the displayed data covers. The panel grows a portfolio
-    /// summary and per-account labels only past one, and the menu bar and
-    /// notifications name accounts only past one, so this is the switch for all
-    /// of them: with a single account every surface reads as it always has.
-    var accountCount: Int { display?.entries.count ?? 0 }
+    /// How many accounts the panel is about: the displayed data's, or, before
+    /// any has arrived, how many are being watched. The panel becomes a list of
+    /// accounts only past one, and the menu bar and notifications name accounts
+    /// only past one, so this is the switch for all of them: with a single
+    /// account every surface reads as it always has.
+    ///
+    /// The watched count stands in until data arrives, deliberately: a
+    /// portfolio whose first poll is still in flight must not head its panel
+    /// with whichever address happens to be first on the list.
+    var accountCount: Int { display?.entries.count ?? applied?.addresses.count ?? 0 }
 
     /// The failure worth stating for the whole panel: a shared stage, which
     /// every account's figures depend on, or a failure that every watched
@@ -68,6 +90,11 @@ final class AppModel {
         return failure
     }
 
+    /// The account whose detail the panel shows, or nil for the list of all of
+    /// them. Held here rather than in the view, so the panel can drop it when it
+    /// closes and `apply()` can drop it when the account leaves the watch.
+    var selectedAccount: AlgorandAddress?
+
     private var poller: ChainPoller?
     private var streamTask: Task<Void, Never>?
 
@@ -76,22 +103,36 @@ final class AppModel {
     /// Built from parsed values rather than raw edit buffers, so whitespace
     /// and other parse-level noise cannot masquerade as a change.
     private struct AppliedWatch {
-        /// The canonical 58-character address, for the panel header.
-        let address: String
-        /// address|algod|indexer: what decides a poller rebuild.
+        /// The canonical 58-character addresses, in watch order.
+        let addresses: [String]
+        /// The algod URL. What the displayed figures and the notification
+        /// cooldowns are answers about: the same address at another source can
+        /// be another network's account entirely, while the indexer only
+        /// backfills rewards, so changing it alone must not blank figures that
+        /// are still valid.
+        let source: String
+        /// addresses|algod|indexer: what decides a poller rebuild.
         let identity: String
-        /// address|algod: what the displayed data and cooldowns belong to. The
-        /// indexer only backfills rewards, so changing it alone must not blank
-        /// figures that are still valid for the unchanged account.
-        let dataIdentity: String
-        var historyKey: String { "alertHistory.\(dataIdentity)" }
-        var severitiesKey: String { "alertSeverities.\(dataIdentity)" }
+
+        /// Cooldowns are recorded per account inside these, since an `AlertKey`
+        /// carries the address it holds for. Keying the bucket on the source
+        /// alone is what lets a changed list keep the cooldowns of the accounts
+        /// that stayed on it, instead of re-announcing everything the moment
+        /// another address is added.
+        var historyKey: String { "alertHistory.\(source)" }
+        var severitiesKey: String { "alertSeverities.\(source)" }
     }
     private var applied: AppliedWatch?
 
-    /// The address the displayed data belongs to. The edit buffer is not it: a
-    /// half-typed draft in Settings must not head another account's figures.
-    var watchedAddress: String? { applied?.address }
+    /// The addresses the displayed data belongs to. The edit buffers are not
+    /// them: a half-typed draft in Settings must not head another account's
+    /// figures.
+    var watchedAddresses: [String] { applied?.addresses ?? [] }
+
+    /// The address the panel names when it is about a single account. Falls
+    /// back to the row being typed, which is all there is before a watch has
+    /// been applied.
+    var watchedAddress: String { watchedAddresses.first ?? addressDrafts.first?.text ?? "" }
     /// What was last written to UserDefaults, so the steady state (no new
     /// notifications, which is almost every poll) costs no write at all rather
     /// than a serialisation and cfprefsd round trip every 30 seconds.
@@ -111,6 +152,11 @@ final class AppModel {
         static let algodURL = "https://mainnet-api.algonode.cloud"
         static let indexerURL = "https://mainnet-idx.algonode.cloud"
     }
+
+    /// Where a store can hold a single watched address instead of the list.
+    /// Read on load and cleared on the first save, so the watch it names
+    /// carries over exactly once and the address does not outlive the list.
+    private let singleAddressKey = "address"
 
     // MARK: - Derived state
 
@@ -282,7 +328,13 @@ final class AppModel {
 
     func load() {
         let defaults = UserDefaults.standard
-        addressText = defaults.string(forKey: "address") ?? ""
+        // A store that holds one address rather than a list still names one
+        // watched account, and comes through as that account with nothing asked
+        // of the user. See `WatchList.restore(list:single:)`.
+        let stored = WatchList.restore(
+            list: defaults.array(forKey: "addresses") as? [String],
+            single: defaults.string(forKey: singleAddressKey))
+        addressDrafts = stored.isEmpty ? [AddressDraft()] : stored.map { AddressDraft(text: $0) }
         algodURLText = defaults.string(forKey: "algodURL") ?? Defaults.algodURL
         indexerURLText = defaults.string(forKey: "indexerURL") ?? Defaults.indexerURL
         if let stored = defaults.array(forKey: "metrics") as? [String] {
@@ -293,7 +345,7 @@ final class AppModel {
         notificationsEnabled = defaults.object(forKey: "notifications") as? Bool ?? true
         valuesHidden = defaults.bool(forKey: "valuesHidden")
         log.info(
-            "load: bundle=\(Bundle.main.bundleIdentifier ?? "nil") address=\(self.addressText.isEmpty ? "empty" : String(self.addressText.prefix(8)))"
+            "load: bundle=\(Bundle.main.bundleIdentifier ?? "nil") addresses=\(stored.count)"
         )
         refreshLoginItemStatus()
         // Without a delegate, macOS silently discards any notification that
@@ -326,25 +378,24 @@ final class AppModel {
     /// is polled: the address, or a data source URL. A submit that changes
     /// nothing leaves the running poller alone.
     func apply() {
-        let trimmed = addressText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else {
+        // An invalid draft never tears down a running watch, however many rows
+        // there are. Focus can leave a half-typed address or URL at any moment,
+        // and losing monitoring over an edit in progress would silently disable
+        // the one job the app has. Each row's live validation and `sourceError`
+        // say why nothing changed; the poller keeps watching the last valid
+        // configuration, and what is persisted stays exactly what is running.
+        //
+        // The row's own validation names an unparseable address; a second
+        // phrasing here would stack beneath it.
+        guard let addresses = try? WatchList.resolve(addressDrafts.map(\.text)) else { return }
+
+        guard !addresses.isEmpty else {
             // Deliberate clearing is persisted; a stored address must not
             // resurrect at the next launch after the user removed it.
-            UserDefaults.standard.set("", forKey: "address")
+            UserDefaults.standard.set([String](), forKey: "addresses")
+            UserDefaults.standard.removeObject(forKey: singleAddressKey)
             stopWatching()
             sourceError = nil
-            return
-        }
-
-        // An invalid draft never tears down a running watch. Focus can leave a
-        // half-typed address or URL at any moment, and losing monitoring over
-        // an edit in progress would silently disable the one job the app has.
-        // The field's live validation and `sourceError` say why nothing
-        // changed; the poller keeps watching the last valid configuration, and
-        // what is persisted stays exactly what is running.
-        guard let address = try? AlgorandAddress(trimmed) else {
-            // The address field's own validation names the problem; a second
-            // phrasing here would stack beneath it.
             return
         }
         let algodText = algodURLText.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -368,40 +419,60 @@ final class AppModel {
         }
         sourceError = nil
 
+        let watched = addresses.map(\.stringValue)
         let next = AppliedWatch(
-            address: address.stringValue,
+            addresses: watched,
+            source: algodURL.absoluteString,
             identity:
-                "\(address.stringValue)|\(algodURL.absoluteString)|\(indexerURL?.absoluteString ?? "")",
-            dataIdentity: "\(address.stringValue)|\(algodURL.absoluteString)")
+                "\(watched.joined(separator: ","))|\(algodURL.absoluteString)|\(indexerURL?.absoluteString ?? "")"
+        )
         // When nothing changed, the running poller is left in peace; a focus
         // change or an identical re-submit costs no writes and no teardown.
         if next.identity == applied?.identity, isRunning { return }
 
         // The watched identity persists only now, past validation, so what is
         // stored is always something a relaunch can actually poll, and always
-        // exactly what is running.
+        // exactly what is running. Canonical, so a pasted address stored in
+        // another case cannot read back as a different account.
         let defaults = UserDefaults.standard
-        defaults.set(address.stringValue, forKey: "address")
+        defaults.set(watched, forKey: "addresses")
+        // The list is the whole of what is watched, so a lone stored address is
+        // cleared as it is taken up into it. Left behind, it would outlive the
+        // moment the user takes that account off the list.
+        defaults.removeObject(forKey: singleAddressKey)
         defaults.set(algodText, forKey: "algodURL")
         defaults.set(indexerText, forKey: "indexerURL")
 
         stop()
-        // Data and cooldowns belong to address|algod. When that pair changes,
-        // the old identity's data must not linger under the new address and the
-        // new identity must not inherit the old one's cooldowns. An
-        // indexer-only change rebuilds the poller but keeps the account data:
-        // every displayed figure except rewards is still valid.
-        if next.dataIdentity != applied?.dataIdentity {
+        // The displayed figures are answers about the accounts on the list, at
+        // this source. Adding an address leaves every one of them true and
+        // still watched, so the panel keeps them until the first poll of the
+        // new list lands. Anything else, a removal or another source, means the
+        // data on display no longer describes the watch, and a figure headed by
+        // an address nobody is watching any more is a quiet lie. An
+        // indexer-only change keeps the data either way: every displayed figure
+        // except rewards is still valid.
+        let stillDescribesTheWatch =
+            next.source == applied?.source
+            && Set(applied?.addresses ?? []).isSubset(of: Set(watched))
+        if !stillDescribesTheWatch {
             update = nil
             lastData = nil
-            persistedHistory = nil
-            persistedSeverities = nil
-            pruneAlertHistory(keeping: next)
         }
+        // Rewritten below whatever happened above, since pruning may have
+        // changed what is stored under these keys.
+        persistedHistory = nil
+        persistedSeverities = nil
+        pruneAlertHistory(keeping: next)
         applied = next
+        // A detail about an account that is no longer watched has nothing left
+        // to show, so the panel returns to the list.
+        if let selected = selectedAccount, !watched.contains(selected.stringValue) {
+            selectedAccount = nil
+        }
 
         let poller = ChainPoller(
-            config: ChainPollerConfig(address: address),
+            config: ChainPollerConfig(addresses: addresses),
             algod: AlgodClient(baseURL: algodURL),
             indexer: indexerURL.map { IndexerClient(baseURL: $0) },
             // Restored so relaunching does not re-announce something the user
@@ -425,7 +496,7 @@ final class AppModel {
             }
         }
         Task {
-            log.info("poller starting for \(address.stringValue.prefix(8))")
+            log.info("poller starting for \(watched.count) account(s)")
             await poller.start()
         }
         isRunning = true
@@ -458,6 +529,7 @@ final class AppModel {
         update = nil
         lastData = nil
         applied = nil
+        selectedAccount = nil
         persistedHistory = nil
         persistedSeverities = nil
     }
@@ -531,16 +603,22 @@ final class AppModel {
     /// does not re-announce a condition the user has already seen. Without this,
     /// a warning that legitimately holds for days notifies on every launch.
     ///
-    /// Keyed by the data identity (address|algod): a cooldown recorded for one address means
-    /// nothing about another, and inheriting it would swallow the new account's
-    /// first alert. Severities are persisted alongside so escalation detection
-    /// survives a relaunch too.
+    /// Bucketed by the chain data source, and keyed within it by account and
+    /// rule: a cooldown recorded for one address means nothing about another,
+    /// and inheriting it would swallow the new account's first alert.
+    /// Severities are persisted alongside so escalation detection survives a
+    /// relaunch too.
     private var historyKey: String? { applied?.historyKey }
     private var severitiesKey: String? { applied?.severitiesKey }
 
-    /// One identity is watched at a time, so history for any other is dead
+    /// One source is watched at a time, so history for any other is dead
     /// weight: pruned on switch rather than accumulating a pair of keys for
-    /// every address ever watched.
+    /// every URL ever configured.
+    ///
+    /// Inside the surviving pair, the accounts that stayed on the list keep
+    /// their cooldowns and the ones taken off it lose theirs. That is what
+    /// makes editing the list cheap: adding an address must not re-announce
+    /// every condition already holding on the others.
     private func pruneAlertHistory(keeping next: AppliedWatch) {
         let defaults = UserDefaults.standard
         for key in defaults.dictionaryRepresentation().keys
@@ -549,6 +627,48 @@ final class AppModel {
                 defaults.removeObject(forKey: key)
             }
         }
+        let watched = Set(next.addresses)
+        prune(key: next.historyKey, watched: watched)
+        prune(key: next.severitiesKey, watched: watched)
+    }
+
+    /// Drops the entries of one stored cooldown dictionary that belong to no
+    /// watched account. An entry that cannot be read is dropped too, which at
+    /// worst re-announces a condition that still holds.
+    private func prune(key: String, watched: Set<String>) {
+        let defaults = UserDefaults.standard
+        guard let stored = defaults.dictionary(forKey: key) else { return }
+        let kept = stored.filter { entry, _ in
+            guard let alertKey = AlertKey(storageKey: entry) else { return false }
+            // An alert about the watch itself, such as the source being
+            // unreachable, belongs to no account and stays.
+            guard let address = alertKey.address else { return true }
+            return watched.contains(address.stringValue)
+        }
+        if kept.count != stored.count { defaults.set(kept, forKey: key) }
+    }
+
+    // MARK: - Editing the list
+
+    /// Appends a row and reports it, so the caller can put the cursor in it.
+    /// Nothing is applied: an empty row watches nothing, and the poller has no
+    /// reason to be disturbed before it is typed into.
+    @discardableResult
+    func addAddressRow() -> AddressDraft.ID {
+        let draft = AddressDraft()
+        addressDrafts.append(draft)
+        return draft.id
+    }
+
+    /// Removes a row and applies the shorter list at once: a removal is a
+    /// finished decision, where a text edit is not, so it does not wait for
+    /// focus to leave some other field.
+    func removeAddressRow(_ id: AddressDraft.ID) {
+        addressDrafts.removeAll { $0.id == id }
+        // Removing the last row is how the watch is cleared, and the blank row
+        // left behind is what the user types the next address into.
+        if addressDrafts.isEmpty { addressDrafts = [AddressDraft()] }
+        apply()
     }
 
     private func loadAlertHistory() -> [AlertKey: Date] {

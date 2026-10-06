@@ -295,3 +295,48 @@ enum Format {
         return "\(value.prefix(6))…\(value.suffix(6))"
     }
 }
+
+extension AccountState {
+    /// Online, eligibility and overall health as one phrase, shared by the
+    /// account's card and its row in the list, so the two cannot word the same
+    /// state two ways.
+    var statusText: String {
+        switch status {
+        case .online: incentiveEligible == true ? "Online and earning" : "Online, not earning"
+        case .offline: "Offline"
+        case .notParticipating: "Not participating"
+        }
+    }
+
+    var statusTint: Color {
+        switch status {
+        case .online: incentiveEligible == true ? .green : .orange
+        case .offline: .red
+        case .notParticipating: .secondary
+        }
+    }
+}
+
+/// The hover highlight of a menu item, shared by every clickable row in the
+/// panel so they all answer the pointer the same way.
+struct RowHighlight: ViewModifier {
+    @State private var isHovering = false
+    @Environment(\.isEnabled) private var isEnabled
+
+    func body(content: Content) -> some View {
+        content
+            // Without this the row only responds where there is ink.
+            .contentShape(Rectangle())
+            // `.quaternary` rather than a hand-picked `Color.primary.opacity(0.09)`:
+            // the hierarchical styles have vibrant variants and respond to Increase
+            // Contrast and Reduce Transparency. A fixed alpha over a material does
+            // neither, and the panel sits on a material.
+            .background(
+                RoundedRectangle(cornerRadius: 5)
+                    .fill(
+                        isHovering && isEnabled ? AnyShapeStyle(.quaternary) : AnyShapeStyle(.clear)
+                    )
+            )
+            .onHover { isHovering = $0 }
+    }
+}

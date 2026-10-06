@@ -7,6 +7,7 @@ import SwiftUI
 /// should be useful before the user has been asked to trust it with anything.
 struct OnboardingView: View {
     @Bindable var model: AppModel
+    @FocusState private var focused: AddressDraft.ID?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -20,7 +21,13 @@ struct OnboardingView: View {
             .font(Typography.primary).foregroundStyle(.secondary)
             .fixedSize(horizontal: false, vertical: true)
 
-            AddressField(model: model)
+            // One field on first run, whatever the app can watch afterwards:
+            // an account to start with is the whole of the setup, and the list
+            // is edited in Settings once there is something to compare against.
+            AddressField(
+                draft: $model.addressDrafts[0], focus: $focused,
+                isMasked: model.valuesHidden
+            ) { model.apply() }
 
             // Without this, a bad stored URL would make Start a silent no-op:
             // the panel has no URL fields, so the reason has to be said here.
@@ -38,7 +45,8 @@ struct OnboardingView: View {
                     .buttonStyle(.borderedProminent)
                     .keyboardShortcut(.defaultAction)
                     .disabled(
-                        model.addressText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                        model.addressDrafts[0].text
+                            .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
         }
         .padding(14)
@@ -53,8 +61,9 @@ struct OnboardingView: View {
 /// labels of differing widths and fields that do not line up.
 ///
 /// Changes take effect as they are made, as macOS settings do, rather than
-/// behind an Apply button. Text fields commit on Return or focus loss, which
-/// avoids restarting the poller on every keystroke of a URL.
+/// behind an Apply button. Text fields commit on Return, on focus loss, and
+/// when the window closes, which avoids restarting the poller on every
+/// keystroke of a URL while leaving no way to lose an edit.
 struct SettingsView: View {
     @Bindable var model: AppModel
 
@@ -70,7 +79,7 @@ struct SettingsView: View {
             }
 
             Section("Account") {
-                AddressField(model: model)
+                AddressList(model: model)
             }
 
             Section("Menu bar") {
@@ -124,6 +133,11 @@ struct SettingsView: View {
         .onChange(of: focusedURL) { old, _ in
             if old != nil { model.apply() }
         }
+        // Closing the window commits too. Dismissing the pane does not move
+        // focus out of the field being typed in, so without this an address
+        // entered and then dismissed would sit in the edit buffer, watched by
+        // nothing, until the pane was next opened.
+        .background(CommitOnClose { model.apply() })
         .formStyle(.grouped)
         // A grouped Form is a scroll view underneath, and a scroll view reports a
         // small ideal height, the same trap as the panel. Taking the content's
@@ -131,6 +145,50 @@ struct SettingsView: View {
         // exactly, so there is nothing left to scroll.
         .fixedSize(horizontal: false, vertical: true)
         .frame(width: 480)
+    }
+}
+
+/// Runs a commit when the window holding this view is about to close.
+///
+/// SwiftUI has no window lifecycle to hook from a Settings scene, so the
+/// closing window is reached through an invisible AppKit view planted behind
+/// the form. The observation is scoped to that one window, so the panel opening
+/// and closing all day never triggers a commit.
+private struct CommitOnClose: NSViewRepresentable {
+    let commit: () -> Void
+
+    func makeNSView(context: Context) -> CloseCommitView {
+        let view = CloseCommitView()
+        view.commit = commit
+        return view
+    }
+
+    func updateNSView(_ view: CloseCommitView, context: Context) {
+        view.commit = commit
+    }
+}
+
+/// The planted view. It has no window until AppKit places it in a hierarchy,
+/// which is why the observer is registered from `viewDidMoveToWindow` rather
+/// than at construction, and removed there when the view leaves a window so no
+/// observation outlives the pane.
+private final class CloseCommitView: NSView {
+    var commit: () -> Void = {}
+    private var observer: (any NSObjectProtocol)?
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        if let observer {
+            NotificationCenter.default.removeObserver(observer)
+            self.observer = nil
+        }
+        guard let window else { return }
+        observer = NotificationCenter.default.addObserver(
+            forName: NSWindow.willCloseNotification, object: window, queue: .main
+        ) { [weak self] _ in
+            // Posted on the main thread, where this view and the model live.
+            MainActor.assumeIsolated { self?.commit() }
+        }
     }
 }
 
@@ -295,20 +353,96 @@ struct LaunchAtLoginRow: View {
     }
 }
 
+/// The watched accounts, in the order every other surface presents them.
+///
+/// Uncapped, like the menu bar metrics, and for the same reason: every address
+/// adds its fetches to each cycle, and that trade is the user's to make. The
+/// cost is stated rather than prevented.
+struct AddressList: View {
+    @Bindable var model: AppModel
+    /// Focus is owned here rather than by each row, so that a newly added row
+    /// can be typed into straight away and so that leaving any row commits it.
+    @FocusState private var focused: AddressDraft.ID?
+
+    /// The rows that name an account an earlier row already names. Compared as
+    /// addresses rather than as text, so a repeat pasted in another case is
+    /// still caught. Silently watching such a row once and showing it twice
+    /// here would leave the user with no way to tell why nothing happened.
+    private var repeats: Set<AddressDraft.ID> {
+        var seen = Set<AlgorandAddress>()
+        var found = Set<AddressDraft.ID>()
+        for draft in model.addressDrafts {
+            guard let address = try? AlgorandAddress(draft.text) else { continue }
+            if !seen.insert(address).inserted { found.insert(draft.id) }
+        }
+        return found
+    }
+
+    var body: some View {
+        let repeats = self.repeats
+
+        VStack(alignment: .leading, spacing: Spacing.row) {
+            ForEach($model.addressDrafts) { $draft in
+                HStack(spacing: 6) {
+                    AddressField(
+                        draft: $draft, focus: $focused, isMasked: model.valuesHidden,
+                        isRepeat: repeats.contains(draft.id)
+                    ) { model.apply() }
+
+                    Button {
+                        model.removeAddressRow(draft.id)
+                    } label: {
+                        Image(systemName: "minus.circle.fill")
+                    }
+                    .buttonStyle(.borderless)
+                    .foregroundStyle(.secondary)
+                    .accessibilityLabel("Remove this account")
+                }
+            }
+
+            Button("Add Account", systemImage: "plus") {
+                focused = model.addAddressRow()
+            }
+
+            // The consequence, said plainly, in place of a limit nobody asked
+            // for. Nothing else about the app changes with the count: the same
+            // two hosts are contacted whatever it is.
+            Text("Every account adds a request to each poll, and a poll runs about every 30 s.")
+                .font(Typography.secondary).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        // Leaving a row commits it, the same contract as the URL fields;
+        // apply() never tears down a running watch over an invalid or empty
+        // draft, so this is always safe.
+        .onChange(of: focused) { old, _ in
+            if old != nil { model.apply() }
+        }
+    }
+}
+
 /// Validates as you type, using the same checksum the protocol uses.
 ///
 /// A transposed character produces a well-formed address for an account that
 /// isn't yours, which would otherwise show a permanently healthy panel while
 /// the real account went unwatched.
 struct AddressField: View {
-    @Bindable var model: AppModel
-    @FocusState private var isFocused: Bool
+    @Binding var draft: AddressDraft
+    var focus: FocusState<AddressDraft.ID?>.Binding
+    /// Masked while values are hidden, since this is the one surface that
+    /// shows an address in full.
+    var isMasked = false
+    /// Whether an earlier row already names this account.
+    var isRepeat = false
+    let onCommit: () -> Void
 
     private var validity: (symbol: String, tint: Color, note: String?)? {
-        let trimmed = model.addressText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmed = draft.text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
         do {
             _ = try AlgorandAddress(trimmed)
+            if isRepeat {
+                return ("exclamationmark.circle.fill", .orange, "Already in the list")
+            }
             return ("checkmark.circle.fill", .green, nil)
         } catch AlgorandAddress.AddressError.badLength(let count) {
             return ("circle.dotted", .secondary, "\(count)/58 characters")
@@ -322,16 +456,17 @@ struct AddressField: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 6) {
-                TextField("Address", text: $model.addressText)
-                    .font(Typography.primary.monospaced())
-                    .focused($isFocused)
-                    .onSubmit { model.apply() }
-                    // Leaving the field commits it, the same contract as the
-                    // URL fields; apply() never tears down a running watch
-                    // over an invalid draft, so this is always safe.
-                    .onChange(of: isFocused) { old, _ in
-                        if old { model.apply() }
-                    }
+                // A secure field is the mask here rather than plain bullets in
+                // a label, because an address that cannot be edited while
+                // values are hidden gives no hint why. The count and the
+                // checksum symbol still report on what is typed.
+                if isMasked {
+                    SecureField("Address", text: $draft.text)
+                        .modifier(AddressFieldStyle(id: draft.id, focus: focus, onCommit: onCommit))
+                } else {
+                    TextField("Address", text: $draft.text)
+                        .modifier(AddressFieldStyle(id: draft.id, focus: focus, onCommit: onCommit))
+                }
                 if let validity {
                     Image(systemName: validity.symbol).foregroundStyle(validity.tint)
                 }
@@ -340,6 +475,21 @@ struct AddressField: View {
                 Text(note).font(Typography.secondary).foregroundStyle(.secondary)
             }
         }
+    }
+}
+
+/// What the plain and masked fields share, so the two cannot drift into
+/// looking or behaving like different controls.
+private struct AddressFieldStyle: ViewModifier {
+    let id: AddressDraft.ID
+    var focus: FocusState<AddressDraft.ID?>.Binding
+    let onCommit: () -> Void
+
+    func body(content: Content) -> some View {
+        content
+            .font(Typography.primary.monospaced())
+            .focused(focus, equals: id)
+            .onSubmit(onCommit)
     }
 }
 

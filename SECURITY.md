@@ -31,7 +31,7 @@ No telemetry, no analytics, no crash reporting, and no third-party SDKs. The `de
 
 ### The one privacy trade
 
-By default those endpoints are a public API provider. That provider can see which address you watch and how often you poll. This is stated in the Settings pane rather than buried here, and both URLs are editable, so anyone who minds can point algobuddy at an algod they control.
+By default those endpoints are a public API provider. That provider can see which addresses you watch and how often you poll. This is stated in the Settings pane rather than buried here, and both URLs are editable, so anyone who minds can point algobuddy at an algod they control.
 
 ### Verifying it
 

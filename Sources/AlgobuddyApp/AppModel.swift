@@ -67,10 +67,10 @@ final class AppModel {
     var display: ChainPoller.Update? { update?.hasData == true ? update : lastData }
 
     /// How many accounts the panel is about: the displayed data's, or, before
-    /// any has arrived, how many are being watched. The panel grows a portfolio
-    /// summary and per-account labels only past one, and the menu bar and
-    /// notifications name accounts only past one, so this is the switch for all
-    /// of them: with a single account every surface reads as it always has.
+    /// any has arrived, how many are being watched. The panel becomes a list of
+    /// accounts only past one, and the menu bar and notifications name accounts
+    /// only past one, so this is the switch for all of them: with a single
+    /// account every surface reads as it always has.
     ///
     /// The watched count stands in until data arrives, deliberately: a
     /// portfolio whose first poll is still in flight must not head its panel
@@ -89,6 +89,11 @@ final class AppModel {
         else { return nil }
         return failure
     }
+
+    /// The account whose detail the panel shows, or nil for the list of all of
+    /// them. Held here rather than in the view, so the panel can drop it when it
+    /// closes and `apply()` can drop it when the account leaves the watch.
+    var selectedAccount: AlgorandAddress?
 
     private var poller: ChainPoller?
     private var streamTask: Task<Void, Never>?
@@ -460,6 +465,11 @@ final class AppModel {
         persistedSeverities = nil
         pruneAlertHistory(keeping: next)
         applied = next
+        // A detail about an account that is no longer watched has nothing left
+        // to show, so the panel returns to the list.
+        if let selected = selectedAccount, !watched.contains(selected.stringValue) {
+            selectedAccount = nil
+        }
 
         let poller = ChainPoller(
             config: ChainPollerConfig(addresses: addresses),
@@ -519,6 +529,7 @@ final class AppModel {
         update = nil
         lastData = nil
         applied = nil
+        selectedAccount = nil
         persistedHistory = nil
         persistedSeverities = nil
     }

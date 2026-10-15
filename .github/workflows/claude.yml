@@ -8,10 +8,12 @@ name: Claude
 # Deliberately scoped for a public, trust-first repository:
 #   - Runs on macOS, so it builds and tests the real app (`make check`) rather
 #     than proposing changes it cannot compile.
-#   - Triggers only for collaborators with write access (the action enforces
-#     this), so anonymous issue text can never drive it. On a public repo an
-#     agent that obeys strangers is a prompt-injection target; this one cannot
-#     hear them.
+#   - Runs only when a collaborator with write access summons it (the action
+#     enforces this) on an issue or pull request that a collaborator opened
+#     (the job guard below enforces that). On a public repo an agent that
+#     obeys strangers is a prompt-injection target, so an issue or pull
+#     request from a stranger cannot start it, and a stranger's comment in a
+#     thread never reaches it (include_comments_by_actor below).
 #   - Authenticated by CLAUDE_CODE_OAUTH_TOKEN, a subscription token generated
 #     with `claude setup-token`. Treat that secret as an account credential.
 #
@@ -35,14 +37,20 @@ concurrency:
 
 jobs:
   claude:
-    # Only spin up a runner when actually summoned. This guard just saves the
-    # runner start; the write-access check inside the action is what decides
-    # who may drive the agent.
+    # Only spin up a runner when actually summoned, and only on an issue or
+    # pull request that a collaborator opened. The write-access check inside
+    # the action decides who may summon the agent; this guard decides whose
+    # issue or pull request it may work on, which that check does not cover.
+    # A pull request event carries no issue, so the association falls back to
+    # the pull request's own author.
     if: |
-      (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@claude')) ||
-      (github.event_name == 'pull_request_review_comment' && contains(github.event.comment.body, '@claude')) ||
-      (github.event_name == 'pull_request_review' && contains(github.event.review.body, '@claude')) ||
-      (github.event_name == 'issues' && (contains(github.event.issue.body, '@claude') || contains(github.event.issue.title, '@claude')))
+      (
+        (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@claude')) ||
+        (github.event_name == 'pull_request_review_comment' && contains(github.event.comment.body, '@claude')) ||
+        (github.event_name == 'pull_request_review' && contains(github.event.review.body, '@claude')) ||
+        (github.event_name == 'issues' && (contains(github.event.issue.body, '@claude') || contains(github.event.issue.title, '@claude')))
+      ) &&
+      contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.issue.author_association || github.event.pull_request.author_association)
 
     # macOS gives the agent the Swift 6 toolchain, so it validates with the
     # real `make check` rather than proposing unbuilt changes. Matches the CI
@@ -66,6 +74,10 @@ jobs:
         with:
           # Subscription auth. See the header for how to mint the token.
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # Only comments by the owner and by apps installed on this repository
+          # reach the agent, so a comment from anyone else in a thread cannot
+          # instruct it. Any collaborator added later belongs in this list too.
+          include_comments_by_actor: "mrcointreau,*[bot]"
           # Result-first comments without narration. Output styles change the
           # agent's system prompt, so this shapes headless runs as well.
           settings: |

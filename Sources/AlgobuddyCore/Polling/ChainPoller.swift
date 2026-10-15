@@ -159,9 +159,9 @@ public actor ChainPoller {
     /// not, the dispatcher is not consulted at all: stamping a notification
     /// nobody saw would silence the real one after the user turns notifications
     /// back on, until its next reminder or, for a rule that never reminds, for
-    /// as long as the condition holds. A lock rather than actor state, so
-    /// the app's toggle takes effect for the very next dispatch instead of
-    /// after a task-scheduling hop during which a poll could still stamp.
+    /// as long as the condition holds. A lock rather than actor state, so a
+    /// change takes effect for the very next dispatch instead of after a
+    /// task-scheduling hop during which a poll could still stamp.
     private final class NotificationsGate: @unchecked Sendable {
         private let lock = NSLock()
         private var wanted: Bool
@@ -270,9 +270,10 @@ public actor ChainPoller {
         await runCycle()
     }
 
-    /// Reflects the app-side notifications toggle, so it can change without
-    /// tearing the poller down. Nonisolated and synchronous: the toggle is
-    /// effective the moment this returns, with no scheduling gap for a poll
+    /// Reflects whether notifications will be shown, which the app derives
+    /// from its toggle and the system's permission, so either can change
+    /// without tearing the poller down. Nonisolated and synchronous: a change
+    /// is effective the moment this returns, with no scheduling gap for a poll
     /// to stamp a cooldown nobody will see.
     public nonisolated func setNotificationsWanted(_ wanted: Bool) {
         notificationsGate.set(wanted)

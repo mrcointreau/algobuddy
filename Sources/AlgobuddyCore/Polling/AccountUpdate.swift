@@ -12,9 +12,10 @@ public struct AccountUpdate: Sendable {
     public let challenge: ChallengeState?
     public let keyExpiry: KeyExpiry?
     public let rewards: RewardsSummary?
-    /// This account's own failure: its account fetch, or its rewards query. The
-    /// stages shared by every account, supply and the challenge seed, fail for
-    /// the cycle rather than for one address and are reported there.
+    /// This account's own failure: its account fetch, or its latest rewards
+    /// query. The stages shared by every account, supply and the challenge
+    /// seed, fail for the cycle rather than for one address and are reported
+    /// there.
     public let failure: PollFailure?
     /// When the figures above were fetched: the cycle's own time, or earlier
     /// for a stale entry. Nil when nothing has been fetched for the account.

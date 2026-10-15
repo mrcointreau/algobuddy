@@ -48,6 +48,16 @@ struct ChainPollerTests {
         stub.route("/v2/blocks/", json: JSONBuilder.blockHeader(round: 64_030_000, seed: seed))
     }
 
+    /// Polls, waits for the rewards fetch that poll started, and polls again
+    /// 30 seconds on: a rewards answer reaches the update of a later cycle,
+    /// never that of the cycle that asked.
+    func pollAfterRewards(_ poller: ChainPoller, clock: TestClock) async -> ChainPoller.Update {
+        _ = await poller.pollOnce()
+        await poller.rewardsSettled()
+        clock.advance(30)
+        return await poller.pollOnce()
+    }
+
     // MARK: - Happy path
 
     @Test("a full cycle derives every participation signal")
@@ -480,7 +490,7 @@ struct ChainPollerTests {
         _ = await held.next()
 
         await poller.refresh()
-        let accountRequests = gate.accountRequestCount
+        let accountRequests = gate.matchingRequestCount
 
         gate.open()
         await poller.stop()
@@ -518,9 +528,12 @@ struct ChainPollerTests {
         stub.route("/v2/block-headers", status: 503, json: "{}")
         let poller = makePoller(stub: stub, clock: clock, withIndexer: true)
 
-        let failing = await poller.pollOnce()
+        let failing = await pollAfterRewards(poller, clock: clock)
         #expect(failing.only?.rewards == nil)
         #expect(failing.failure?.stage == .rewards)
+        // That poll also retried the failed query. Settling it here keeps it
+        // on the 503, so the next query is the first to succeed.
+        await poller.rewardsSettled()
 
         stub.route(
             "/v2/block-headers",
@@ -528,9 +541,10 @@ struct ChainPollerTests {
                 [(round: 64_030_000, timestamp: 1_785_996_400, payout: 8_000_000)],
                 proposer: Self.addressString))
         clock.advance(30)
-        let recovered = await poller.pollOnce()
+        let recovered = await pollAfterRewards(poller, clock: clock)
         #expect(recovered.only?.rewards != nil)
         #expect(recovered.only?.rewards?.proposals24h == 1)
+        #expect(recovered.failure == nil)
     }
 
     /// Blocks are immutable, so the second rewards fetch resumes past what is
@@ -549,8 +563,10 @@ struct ChainPollerTests {
         let poller = makePoller(stub: stub, clock: clock, withIndexer: true)
 
         _ = await poller.pollOnce()
+        await poller.rewardsSettled()
         clock.advance(301)
         _ = await poller.pollOnce()
+        await poller.rewardsSettled()
 
         let calls = stub.requests.filter { $0.contains("/v2/block-headers") }
         #expect(calls.count == 2)
@@ -577,8 +593,9 @@ struct ChainPollerTests {
         let poller = makePoller(stub: stub, clock: clock, withIndexer: true)
 
         _ = await poller.pollOnce()
+        await poller.rewardsSettled()
         clock.advance(301)
-        let update = await poller.pollOnce()
+        let update = await pollAfterRewards(poller, clock: clock)
 
         let calls = stub.requests.filter { $0.contains("/v2/block-headers") }
         #expect(calls.count == 2)
@@ -601,12 +618,12 @@ struct ChainPollerTests {
                 proposer: Self.addressString))
         let poller = makePoller(stub: stub, clock: clock, withIndexer: true)
 
-        let early = await poller.pollOnce()
+        let early = await pollAfterRewards(poller, clock: clock)
         #expect(early.only?.rewards?.proposals24h == 0)
 
         standardRoutes(stub, round: 64_030_200, seed: nonMatchingSeed)
         clock.advance(301)
-        let caughtUp = await poller.pollOnce()
+        let caughtUp = await pollAfterRewards(poller, clock: clock)
         #expect(caughtUp.only?.rewards?.proposals24h == 1)
     }
 
@@ -626,8 +643,10 @@ struct ChainPollerTests {
         let poller = makePoller(stub: stub, clock: clock, withIndexer: true)
 
         _ = await poller.pollOnce()
+        await poller.rewardsSettled()
         clock.advance(301)
         _ = await poller.pollOnce()
+        await poller.rewardsSettled()
 
         let calls = stub.requests.filter { $0.contains("/v2/block-headers") }
         #expect(calls.count == 2)
@@ -672,7 +691,8 @@ struct ChainPollerTests {
                     (round: 64_010_000, timestamp: nowSeconds - 180_000, payout: nil),
                 ], proposer: Self.addressString))
 
-        let update = await makePoller(stub: stub, clock: clock, withIndexer: true).pollOnce()
+        let update = await pollAfterRewards(
+            makePoller(stub: stub, clock: clock, withIndexer: true), clock: clock)
         let rewards = try #require(update.only?.rewards)
 
         #expect(rewards.proposals24h == 1)
@@ -689,8 +709,10 @@ struct ChainPollerTests {
         let clock = TestClock()
         standardRoutes(stub, seed: nonMatchingSeed)
         stub.route("/v2/block-headers", json: "{\"blocks\":[]}")
+        let poller = makePoller(stub: stub, clock: clock, withIndexer: true)
 
-        _ = await makePoller(stub: stub, clock: clock, withIndexer: true).pollOnce()
+        _ = await poller.pollOnce()
+        await poller.rewardsSettled()
 
         let request = try #require(stub.requests.first { $0.contains("/v2/block-headers") })
         #expect(request.contains("min-round="))
@@ -714,7 +736,8 @@ struct ChainPollerTests {
                 "proposer":"\(Self.addressString)","proposer-payout":8000000}],"next-token":"more"}
                 """)
 
-        let update = await makePoller(stub: stub, clock: clock, withIndexer: true).pollOnce()
+        let update = await pollAfterRewards(
+            makePoller(stub: stub, clock: clock, withIndexer: true), clock: clock)
 
         #expect(update.only?.rewards?.isTruncated == true)
         #expect(stub.requestCount(containing: "/v2/block-headers") == 10)  // the page budget
@@ -726,8 +749,105 @@ struct ChainPollerTests {
         let clock = TestClock()
         standardRoutes(stub, seed: nonMatchingSeed)
         stub.route("/v2/block-headers", json: "{\"blocks\":[]}")
-        let update = await makePoller(stub: stub, clock: clock, withIndexer: true).pollOnce()
+        let update = await pollAfterRewards(
+            makePoller(stub: stub, clock: clock, withIndexer: true), clock: clock)
         #expect(update.only?.rewards?.isTruncated == false)
+    }
+
+    /// The indexer is optional and often the slower host. A rewards query that
+    /// hangs must hold back neither the account figures nor their alerts, and
+    /// must not be asked again while it is still out.
+    @Test("a hanging rewards query holds back no cycle")
+    func hangingRewardsQueryHoldsBackNoCycle() async throws {
+        let stub = StubFetcher()
+        let clock = TestClock()
+        standardRoutes(stub, seed: nonMatchingSeed)
+        stub.route(
+            "/v2/block-headers",
+            json: JSONBuilder.blockHeaders(
+                [(round: 64_030_000, timestamp: 1_785_996_400, payout: 8_000_000)],
+                proposer: Self.addressString))
+        let gate = FirstRequestGate(stub, holding: "/v2/block-headers")
+        let poller = ChainPoller(
+            config: ChainPollerConfig(address: address),
+            algod: AlgodClient(baseURL: URL(string: "https://chain.example")!, fetcher: stub),
+            indexer: IndexerClient(baseURL: URL(string: "https://idx.example")!, fetcher: gate),
+            dates: clock)
+        let rescue = watchdog { gate.open() }
+        defer { rescue.cancel() }
+
+        let first = await poller.pollOnce()
+        var held = gate.firstHeld.makeAsyncIterator()
+        _ = await held.next()
+        #expect(first.only?.account != nil)
+        #expect(first.only?.rewards == nil)
+
+        clock.advance(301)
+        let second = await poller.pollOnce()
+        #expect(second.only?.account != nil)
+
+        gate.open()
+        await poller.rewardsSettled()
+        // The second poll found the query still out and asked nothing more.
+        #expect(gate.matchingRequestCount == 1)
+
+        clock.advance(30)
+        let answered = await poller.pollOnce()
+        #expect(answered.only?.rewards?.proposals24h == 1)
+    }
+
+    /// Settings replaces the poller when the hosts change, and the old one may
+    /// still have a rewards query out. Stopping it cancels that query, so it
+    /// goes no further against a host the user has moved away from.
+    @Test("stop cancels a rewards query that is still out")
+    func stopCancelsRewardsQuery() async throws {
+        let stub = StubFetcher()
+        standardRoutes(stub, seed: nonMatchingSeed)
+        stub.route("/v2/block-headers", json: "{\"blocks\":[]}")
+        let gate = FirstRequestGate(stub, holding: "/v2/block-headers")
+        let poller = ChainPoller(
+            config: ChainPollerConfig(address: address),
+            algod: AlgodClient(baseURL: URL(string: "https://chain.example")!, fetcher: stub),
+            indexer: IndexerClient(baseURL: URL(string: "https://idx.example")!, fetcher: gate),
+            dates: TestClock())
+        let rescue = watchdog { gate.open() }
+        defer { rescue.cancel() }
+
+        _ = await poller.pollOnce()
+        var held = gate.firstHeld.makeAsyncIterator()
+        _ = await held.next()
+        await poller.stop()
+        gate.open()
+        await poller.rewardsSettled()
+
+        #expect(gate.heldRequestWasCancelled)
+    }
+
+    /// A cycle still in flight when its poller stops runs on to its end. It
+    /// must not leave behind a rewards query that outlives the poller.
+    @Test("a cycle that ends after stop starts no rewards query")
+    func cycleEndingAfterStopStartsNoRewardsQuery() async throws {
+        let stub = StubFetcher()
+        standardRoutes(stub, seed: nonMatchingSeed)
+        stub.route("/v2/block-headers", json: "{\"blocks\":[]}")
+        let gate = FirstRequestGate(stub, holding: "/v2/ledger/supply")
+        let poller = ChainPoller(
+            config: ChainPollerConfig(address: address),
+            algod: AlgodClient(baseURL: URL(string: "https://chain.example")!, fetcher: gate),
+            indexer: IndexerClient(baseURL: URL(string: "https://idx.example")!, fetcher: stub),
+            dates: TestClock())
+        let rescue = watchdog { gate.open() }
+        defer { rescue.cancel() }
+
+        let cycle = Task { await poller.pollOnce() }
+        var held = gate.firstHeld.makeAsyncIterator()
+        _ = await held.next()
+        await poller.stop()
+        gate.open()
+        _ = await cycle.value
+        await poller.rewardsSettled()
+
+        #expect(stub.requestCount(containing: "/v2/block-headers") == 0)
     }
 
     @Test("rewards are omitted entirely when no indexer is configured")
@@ -1152,13 +1272,14 @@ struct ChainPollerTests {
         let poller = makePoller(
             stub: stub, clock: clock, addresses: [address, second], withIndexer: true)
 
-        let first = await poller.pollOnce()
+        let first = await pollAfterRewards(poller, clock: clock)
         #expect(first.entry(for: address)?.rewards?.earned24h == MicroAlgos(8_000_000))
         #expect(first.entry(for: second)?.rewards?.earned24h == MicroAlgos(5_000_000))
         #expect(first.portfolio.earned24h == MicroAlgos(13_000_000))
 
         clock.advance(301)
         _ = await poller.pollOnce()
+        await poller.rewardsSettled()
 
         let calls = stub.requests.filter { $0.contains("/v2/block-headers") }
         #expect(calls.count == 4)

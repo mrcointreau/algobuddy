@@ -63,6 +63,9 @@ public struct PollFailure: Sendable, Equatable {
 /// Poll shape per cycle: one account fetch per address always; supply, challenge
 /// seed and rewards only when their own intervals lapse or the challenge window
 /// rolls. In the steady state that is one request per account every 30 s.
+/// Rewards run beside the cycles rather than inside one, so an indexer that is
+/// slow or unreachable never holds back the figures and alerts that come from
+/// algod.
 public actor ChainPoller {
 
     public struct Update: Sendable {
@@ -77,8 +80,8 @@ public actor ChainPoller {
         public let alerts: [HealthAlert]
         /// The subset of `alerts` that should raise a notification now.
         public let notifications: [HealthAlert]
-        /// The first thing that went wrong this cycle, whichever account or
-        /// shared stage it belonged to. An entry's own failure is on the entry.
+        /// The first thing that went wrong, whichever account or shared stage
+        /// it belonged to. An entry's own failure is on the entry.
         public let failure: PollFailure?
         /// Notification times, for the caller to persist so cooldowns survive a
         /// relaunch. See `AlertDispatcher.init(cooldown:lastNotified:lastSeverity:)`.
@@ -116,8 +119,15 @@ public actor ChainPoller {
         var tracker = RewardsTracker()
         var fetchedAt: Date?
         var isTruncated = false
+        /// Why the latest query failed, kept until one succeeds, since the
+        /// query finishes after the cycle that started it.
+        var failure: PollFailure?
     }
     private var rewards: [AlgorandAddress: AccountRewards] = [:]
+
+    /// The rewards fetch under way, if any. No second one starts beside it, so
+    /// a slow indexer is asked once at a time rather than again every cycle.
+    private var rewardsFetch: Task<Void, Never>?
 
     /// Each account's last fetched entry, with the alerts evaluated for it
     /// then. When a later fetch of that account fails while others answer,
@@ -236,6 +246,7 @@ public actor ChainPoller {
         isStopped = true
         pollTask?.cancel()
         pollTask = nil
+        rewardsFetch?.cancel()
         continuation.finish()
     }
 
@@ -279,6 +290,8 @@ public actor ChainPoller {
     /// Runs a single poll and returns the result. Split out from `start()` so
     /// every behaviour below is testable without timers or sleeping. Callers
     /// that publish go through `runCycle()`, which owns the in-flight guard.
+    /// A rewards fetch it starts reports to a later update; see
+    /// `rewardsSettled()`.
     @discardableResult
     public func pollOnce() async -> Update {
         let now = dates.now
@@ -321,9 +334,9 @@ public actor ChainPoller {
         consecutiveFailures = 0
         roundClock.observe(round: round, at: now)
 
-        // The remaining fetches depend only on the accounts above and not on
-        // each other, so they overlap: a multi-fetch cycle pays for its slowest
-        // leg rather than the sum of the round trips.
+        // The supply and seed fetches depend only on the accounts above and not
+        // on each other, so they overlap: a multi-fetch cycle pays for its
+        // slowest leg rather than the sum of the round trips.
         let algod = self.algod
         let needSupply =
             supply == nil || elapsed(since: supplyFetchedAt, now: now) >= config.supplyInterval
@@ -332,27 +345,9 @@ public actor ChainPoller {
         // many accounts are watched.
         let challengeRound = Challenge.challengeRound(for: round, params: config.params)
         let seedRound = challengeRound != challengeSeedRound ? challengeRound : nil
-        let windowRounds = UInt64(config.rewardsWindowDays * 86_400 / max(roundClock.estimate, 0.5))
-        let windowStart = round > windowRounds ? round - windowRounds : 0
-        let rewardsRequests = addresses.filter { accounts[$0] != nil }
-            .compactMap { address -> ProposalRequest? in
-                let state = rewards[address] ?? AccountRewards()
-                guard elapsed(since: state.fetchedAt, now: now) >= config.rewardsInterval
-                else { return nil }
-                // Resume past what is already cached rather than
-                // re-downloading the whole window every cycle: blocks are
-                // immutable, so anything held cannot have changed, and a
-                // previously truncated fetch picks its tail back up from here.
-                // The step saturates rather than traps, because the round comes
-                // from a user-configured endpoint.
-                let resume = state.tracker.highestRound.map { $0 < .max ? $0 + 1 : $0 } ?? 0
-                return ProposalRequest(address: address, minRound: max(windowStart, resume))
-            }
 
         async let supplyFetch = Self.attempt(needSupply ? algod : nil) { try await $0.supply() }
         async let seedFetch = Self.attempt(seedRound) { try await algod.blockHeader($0) }
-        async let rewardsFetches = Self.fetchProposals(
-            indexer: rewardsRequests.isEmpty ? nil : indexer, requests: rewardsRequests)
 
         var failure: PollFailure?
 
@@ -393,17 +388,14 @@ public actor ChainPoller {
             break
         }
 
-        for (address, result) in await rewardsFetches {
-            switch result {
-            case .success(let page):
-                var state = rewards[address] ?? AccountRewards()
-                state.tracker.ingest(page.blocks, windowStartRound: windowStart, latestRound: round)
-                state.isTruncated = page.truncated
-                state.fetchedAt = now
-                rewards[address] = state
-            case .failure(let error):
-                failures[address] = PollFailure(stage: .rewards, message: describe(error))
-            }
+        let fetched = addresses.filter { accounts[$0] != nil }
+        // Started after the cycle's last wait, so its answer reaches a later
+        // update rather than racing this one.
+        startRewardsFetch(for: fetched, round: round, now: now)
+        // A fetched account's own failure, if any, is its latest rewards
+        // query's, which may have finished between two cycles.
+        for address in fetched {
+            failures[address] = rewards[address]?.failure
         }
 
         return successUpdate(
@@ -440,6 +432,67 @@ public actor ChainPoller {
     ) async -> Result<Value, any Error>? {
         guard let input else { return nil }
         do { return .success(try await operation(input)) } catch { return .failure(error) }
+    }
+
+    // MARK: - Rewards
+
+    /// Starts the proposal queries that are due, unless a fetch is still out.
+    /// A cycle can finish after `stop()`, and a query started then would
+    /// outlive the poller and could reach a host the user has since replaced.
+    private func startRewardsFetch(for addresses: [AlgorandAddress], round: UInt64, now: Date) {
+        guard !isStopped, rewardsFetch == nil, let indexer else { return }
+        let windowRounds = UInt64(config.rewardsWindowDays * 86_400 / max(roundClock.estimate, 0.5))
+        let windowStart = round > windowRounds ? round - windowRounds : 0
+        let requests = addresses.compactMap { address -> ProposalRequest? in
+            let state = rewards[address] ?? AccountRewards()
+            guard elapsed(since: state.fetchedAt, now: now) >= config.rewardsInterval
+            else { return nil }
+            // Resume past what is already cached rather than re-downloading
+            // the whole window every cycle: blocks are immutable, so anything
+            // held cannot have changed, and a previously truncated fetch picks
+            // its tail back up from here. The step saturates rather than traps,
+            // because the round comes from a user-configured endpoint.
+            let resume = state.tracker.highestRound.map { $0 < .max ? $0 + 1 : $0 } ?? 0
+            return ProposalRequest(address: address, minRound: max(windowStart, resume))
+        }
+        guard !requests.isEmpty else { return }
+        rewardsFetch = Task { [weak self] in
+            let results = await Self.fetchProposals(indexer: indexer, requests: requests)
+            await self?.receiveRewards(
+                results, windowStart: windowStart, round: round, requestedAt: now)
+        }
+    }
+
+    /// Takes in a finished rewards fetch, whichever cycle is under way. A
+    /// failed query leaves the account's figures as they were and records why.
+    ///
+    /// The next cycle shows the result. A cycle run at once to show it sooner
+    /// would give the round clock a sample over a second or so, where one
+    /// round more or less is most of the measurement, and skew every countdown.
+    private func receiveRewards(
+        _ results: [(AlgorandAddress, Result<ProposalPage, any Error>)],
+        windowStart: UInt64, round: UInt64, requestedAt: Date
+    ) {
+        rewardsFetch = nil
+        for (address, result) in results {
+            var state = rewards[address] ?? AccountRewards()
+            switch result {
+            case .success(let page):
+                state.tracker.ingest(page.blocks, windowStartRound: windowStart, latestRound: round)
+                state.isTruncated = page.truncated
+                state.fetchedAt = requestedAt
+                state.failure = nil
+            case .failure(let error):
+                state.failure = PollFailure(stage: .rewards, message: describe(error))
+            }
+            rewards[address] = state
+        }
+    }
+
+    /// Waits until the rewards fetch under way, if any, has been taken in. No
+    /// cycle waits for it; a test does, to know which update will show it.
+    func rewardsSettled() async {
+        await rewardsFetch?.value
     }
 
     // MARK: - Derivation
@@ -685,13 +738,10 @@ public actor ChainPoller {
     /// Runs every due account's proposal query at once, and reports each
     /// address's outcome on its own so one indexer error cannot blank the
     /// rewards of the accounts that answered.
-    ///
-    /// A nil indexer means rewards are not configured, or nothing is due.
     private nonisolated static func fetchProposals(
-        indexer: IndexerClient?, requests: [ProposalRequest]
+        indexer: IndexerClient, requests: [ProposalRequest]
     ) async -> [(AlgorandAddress, Result<ProposalPage, any Error>)] {
-        guard let indexer else { return [] }
-        return await withTaskGroup(of: (AlgorandAddress, Result<ProposalPage, any Error>).self) {
+        await withTaskGroup(of: (AlgorandAddress, Result<ProposalPage, any Error>).self) {
             group in
             for request in requests {
                 group.addTask {

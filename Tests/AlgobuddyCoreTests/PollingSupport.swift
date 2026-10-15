@@ -94,27 +94,37 @@ final class StubFetcher: HTTPFetching, @unchecked Sendable {
     }
 }
 
-/// Holds the first account request until released and lets every later one
-/// through, so a test can act while a cycle is suspended mid-flight. Letting
-/// later requests through is what turns a second, concurrent cycle into a
-/// countable request rather than a deadlock.
+/// Holds the first request whose URL contains a fragment until released and
+/// lets every later one through, so a test can act while that request is
+/// suspended mid-flight. Letting later requests through is what turns a second,
+/// concurrent one into a countable request rather than a deadlock.
 final class FirstRequestGate: HTTPFetching, @unchecked Sendable {
     private let inner: StubFetcher
+    private let fragment: String
     private let lock = NSLock()
-    private var accountRequests = 0
+    private var matchingRequests = 0
     private var isOpen = false
     private var held: CheckedContinuation<Void, Never>?
+    private var cancelledWhileHeld = false
 
-    /// Yields once the first account request is being held.
+    /// Yields once the first matching request is being held, and finishes when
+    /// the gate opens.
     let firstHeld: AsyncStream<Void>
     private let firstHeldContinuation: AsyncStream<Void>.Continuation
 
-    init(_ inner: StubFetcher) {
+    init(_ inner: StubFetcher, holding fragment: String = "/v2/accounts/") {
         self.inner = inner
+        self.fragment = fragment
         (firstHeld, firstHeldContinuation) = AsyncStream.makeStream()
     }
 
-    var accountRequestCount: Int { lock.withLock { accountRequests } }
+    /// The matching requests made so far, the held one included.
+    var matchingRequestCount: Int { lock.withLock { matchingRequests } }
+
+    /// Whether the held request's task was cancelled by the time the gate let
+    /// it through. The request still goes on to the stub, which ignores
+    /// cancellation.
+    var heldRequestWasCancelled: Bool { lock.withLock { cancelledWhileHeld } }
 
     func open() {
         let waiting = lock.withLock { () -> CheckedContinuation<Void, Never>? in
@@ -124,17 +134,20 @@ final class FirstRequestGate: HTTPFetching, @unchecked Sendable {
             return waiting
         }
         waiting?.resume()
+        // Nothing is held from here on, so a test still waiting for a hold
+        // goes on instead of hanging.
+        firstHeldContinuation.finish()
     }
 
     func get(
         _ url: URL, headers: [String: String], timeout: TimeInterval
     ) async throws -> (Data, Int) {
-        let isFirstAccountRequest = lock.withLock { () -> Bool in
-            guard url.absoluteString.contains("/v2/accounts/") else { return false }
-            accountRequests += 1
-            return accountRequests == 1
+        let isFirstMatchingRequest = lock.withLock { () -> Bool in
+            guard url.absoluteString.contains(fragment) else { return false }
+            matchingRequests += 1
+            return matchingRequests == 1
         }
-        if isFirstAccountRequest {
+        if isFirstMatchingRequest {
             await withCheckedContinuation { continuation in
                 let proceed = lock.withLock { () -> Bool in
                     if isOpen { return true }
@@ -147,8 +160,23 @@ final class FirstRequestGate: HTTPFetching, @unchecked Sendable {
                     firstHeldContinuation.yield()
                 }
             }
+            let cancelled = Task.isCancelled
+            lock.withLock { cancelledWhileHeld = cancelled }
         }
         return try await inner.get(url, headers: headers, timeout: timeout)
+    }
+}
+
+/// Runs `rescue` unless cancelled within `seconds`. A test that holds a request
+/// or waits on a stream starts one, so a regression that would leave it waiting
+/// forever fails the test instead of hanging the suite. A time limit cannot do
+/// this: cancelling the test does not end a wait on another task's result.
+func watchdog(
+    after seconds: Double = 10, _ rescue: @escaping @Sendable () async -> Void
+) -> Task<Void, Never> {
+    Task {
+        try? await Task.sleep(for: .seconds(seconds))
+        if !Task.isCancelled { await rescue() }
     }
 }
 

@@ -23,7 +23,10 @@ public struct PortfolioSummary: Sendable, Equatable {
     /// limit, which is the deadline that most deserves to win.
     public var closestAbsenceHeadroom: TimeInterval?
     /// Time until the first account's participation keys expire, on the same
-    /// terms as `closestAbsenceHeadroom`.
+    /// terms as `closestAbsenceHeadroom`. Only Online accounts count, as only
+    /// theirs raise alerts: the lapsed keys of a suspended account would
+    /// otherwise read "overdue" while every Online account has months left.
+    /// Each account's own card still shows its keys.
     public var closestKeyExpiry: TimeInterval?
     public var proposals24h = 0
     public var proposals7d = 0
@@ -63,7 +66,7 @@ public struct PortfolioSummary: Sendable, Equatable {
                 closestAbsenceHeadroom = Self.closest(
                     closestAbsenceHeadroom, absence.headroom(roundTime: roundTime))
             }
-            if let expiry = entry.keyExpiry {
+            if let expiry = entry.keyExpiry, entry.account?.status == .online {
                 closestKeyExpiry = Self.closest(
                     closestKeyExpiry, expiry.timeRemaining(roundTime: roundTime))
             }

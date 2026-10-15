@@ -58,3 +58,15 @@ public struct AccountState: Decodable, Sendable, Equatable {
         case lastHeartbeat = "last-heartbeat"
     }
 }
+
+extension AccountState {
+    /// Whether proposing a block pays this account: Online, incentive-eligible,
+    /// and with a balance inside the payout window. These are the conditions
+    /// under which the alert engine raises neither `notEarning` nor
+    /// `balanceOutOfRange`, so a surface that says "earning" cannot sit beside
+    /// an alert that says proposing pays nothing. The default parameters are
+    /// the ones `ChainPollerConfig` evaluates alerts under.
+    public func earnsPayouts(under params: ConsensusParams = .v40) -> Bool {
+        status == .online && incentiveEligible == true && params.isBalanceEligible(amount)
+    }
+}

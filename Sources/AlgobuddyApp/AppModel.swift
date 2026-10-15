@@ -333,6 +333,63 @@ final class AppModel {
         SMAppService.openSystemSettingsLoginItems()
     }
 
+    // MARK: - Notification permission
+
+    /// Mirrors the system's notification permission, which is the source of
+    /// truth, since the user can change it in System Settings at any time.
+    /// Nil until first read.
+    private(set) var notificationAuthorization: UNAuthorizationStatus?
+
+    /// The user wants notifications and macOS refuses them. Settings says so,
+    /// since nothing else would: a refused banner leaves no trace.
+    var notificationsBlocked: Bool {
+        notificationsEnabled && notificationAuthorization == .denied
+    }
+
+    /// Whether alerts are dispatched at all: wanted, and allowed. A permission
+    /// not yet read counts as refused, because every dispatch stamps a
+    /// cooldown, and one stamped for a banner the system drops holds back the
+    /// real one after the permission is granted.
+    private var deliversNotifications: Bool {
+        notificationsEnabled
+            && (notificationAuthorization == .authorized
+                || notificationAuthorization == .provisional)
+    }
+
+    private var notificationQueries = 0
+    private var activationObserver: (any NSObjectProtocol)?
+
+    /// Reads the permission and opens or closes the poller's gate to match.
+    /// Only the latest of overlapping reads lands, so a slow one cannot leave
+    /// a stale status behind.
+    private func refreshNotificationAuthorization() {
+        guard canNotify else { return }
+        notificationQueries += 1
+        let query = notificationQueries
+        // As in `refreshLoginItemStatus()`, the task inherits main-actor
+        // isolation and only the nonisolated query hops off.
+        Task { [weak self] in
+            let status = await Self.queryNotificationAuthorization()
+            guard let self, query == self.notificationQueries else { return }
+            self.notificationAuthorization = status
+            self.poller?.setNotificationsWanted(self.deliversNotifications)
+        }
+    }
+
+    private nonisolated static func queryNotificationAuthorization() async
+        -> UNAuthorizationStatus
+    {
+        await UNUserNotificationCenter.current().notificationSettings().authorizationStatus
+    }
+
+    func openNotificationSettings() {
+        guard
+            let url = URL(
+                string: "x-apple.systempreferences:com.apple.Notifications-Settings.extension")
+        else { return }
+        NSWorkspace.shared.open(url)
+    }
+
     // MARK: - Lifecycle
 
     func load() {
@@ -371,7 +428,19 @@ final class AppModel {
         // the follow-up would be swallowed too.
         if canNotify {
             UNUserNotificationCenter.current().delegate = notificationPresenter
+            // The permission can change in System Settings while the app runs,
+            // and coming back to the panel or to Settings activates the app,
+            // so that is where a change is read straight away.
+            activationObserver = NotificationCenter.default.addObserver(
+                forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main
+            ) { [weak self] _ in
+                MainActor.assumeIsolated { self?.refreshNotificationAuthorization() }
+            }
         }
+        // Read before the first poll can dispatch, which it almost always
+        // trails: a local query against a network round trip. Should the poll
+        // win, its alerts wait for the next one rather than stamp a cooldown.
+        refreshNotificationAuthorization()
         apply()
     }
 
@@ -494,7 +563,7 @@ final class AppModel {
             dispatcher: AlertDispatcher(
                 lastNotified: loadAlertHistory(),
                 lastSeverity: loadAlertSeverities()),
-            notificationsWanted: notificationsEnabled)
+            notificationsWanted: deliversNotifications)
         self.poller = poller
 
         streamTask = Task { [weak self] in
@@ -560,7 +629,7 @@ final class AppModel {
         // Synchronous through the poller's gate: effective before this call
         // returns, so no in-flight poll can stamp a cooldown for a
         // notification that will never be shown.
-        poller?.setNotificationsWanted(enabled)
+        poller?.setNotificationsWanted(deliversNotifications)
     }
 
     private(set) var isRefreshing = false
@@ -592,6 +661,11 @@ final class AppModel {
         for alert in value.notifications {
             post(alert)
         }
+        // A permission changed in System Settings while the app is in the
+        // background, granted or withdrawn, would otherwise wait for the next
+        // activation, so it is read with every poll as well: one local query,
+        // which keeps the gate within a poll of the truth.
+        refreshNotificationAuthorization()
     }
 
     /// An hourly `.notice` line, so uptime is answerable after the fact.
@@ -776,10 +850,21 @@ final class AppModel {
     /// Guarding keeps the binary usable outside the .app wrapper for development.
     private var canNotify: Bool { runsFromBundle }
 
+    /// The gate opens once the answer is read back, so nothing is dispatched
+    /// while the prompt is still on screen.
     private func requestNotificationAuthorisation() {
         guard canNotify else { return }
-        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in
+        Task { [weak self] in
+            await Self.askForNotificationPermission()
+            self?.refreshNotificationAuthorization()
         }
+    }
+
+    /// Shows the system prompt the first time, and answers from the stored
+    /// decision after that.
+    private nonisolated static func askForNotificationPermission() async {
+        _ = try? await UNUserNotificationCenter.current()
+            .requestAuthorization(options: [.alert, .sound])
     }
 
     private func post(_ alert: HealthAlert) {
@@ -802,7 +887,13 @@ final class AppModel {
             UNNotificationRequest(
                 identifier: alert.key.notificationIdentifier,
                 content: content,
-                trigger: nil))
+                trigger: nil)
+        ) { error in
+            // A refusal most likely means the permission was withdrawn since
+            // it was last read. The read that follows every poll's posts
+            // closes the gate, so this only has to leave a trace.
+            if let error { log.error("notification not posted: \(error.localizedDescription)") }
+        }
     }
 }
 

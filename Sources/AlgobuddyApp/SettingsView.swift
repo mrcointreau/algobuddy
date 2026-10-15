@@ -121,6 +121,18 @@ struct SettingsView: View {
                         set: { model.setNotifications(enabled: $0) })
                 )
                 .toggleStyle(.checkbox)
+
+                // The toggle states what the user wants, not what macOS
+                // allows, so a refusal is said beside it.
+                if model.notificationsBlocked {
+                    HStack(spacing: 6) {
+                        Text("Notifications for algobuddy are off in System Settings.")
+                            .font(Typography.secondary).foregroundStyle(.orange)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Button("Open Notifications") { model.openNotificationSettings() }
+                            .buttonStyle(.link).font(Typography.secondary)
+                    }
+                }
             }
 
             VersionFooter(model: model)

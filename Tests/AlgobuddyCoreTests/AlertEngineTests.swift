@@ -218,6 +218,26 @@ struct AlertEngineTests {
                 .contains { $0.id == .balanceOutOfRange })
     }
 
+    /// "Earning" on a card or a row has to agree with the alerts beside it: it
+    /// holds exactly when neither eligibility alert does.
+    @Test("earning means Online, eligible and inside the payout window, as the alerts do")
+    func earningMatchesTheAlerts() {
+        let cases: [(AccountState, Bool)] = [
+            (account(), true),
+            (account(eligible: false), false),
+            (account(eligible: nil), false),
+            (account(amount: 29_999_000_000), false),
+            (account(amount: 70_000_000_000_001), false),
+            (account(status: .offline), false),
+        ]
+        for (account, earns) in cases {
+            #expect(account.earnsPayouts() == earns)
+            guard account.status == .online else { continue }
+            let alerts = engine.evaluate(Snapshot(account: account)).map(\.id)
+            #expect(earns == !(alerts.contains(.notEarning) || alerts.contains(.balanceOutOfRange)))
+        }
+    }
+
     /// Suspension is the event this app exists to catch, so an Offline account
     /// has to raise something rather than only colouring a dot in the panel.
     @Test("an offline account raises one critical alert")

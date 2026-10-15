@@ -93,6 +93,28 @@ struct PortfolioSummaryTests {
     /// An account already past its limit is the one thing the portfolio most
     /// needs to say, so a negative headroom must win rather than be discarded
     /// for being smaller than nothing.
+    /// The menu bar's key countdown follows the alerts, which say nothing about
+    /// the keys of an account that is not Online. A suspended account's lapsed
+    /// keys would otherwise read "overdue" while the Online one has months left.
+    @Test("the key countdown counts Online accounts only")
+    func keyExpiryCountsOnlineAccountsOnly() {
+        let lapsed = KeyExpiry(
+            participation: AccountState.Participation(
+                voteFirstValid: 0, voteLastValid: 64_000_000, voteKeyDilution: 1_667),
+            currentRound: 64_030_100)
+        let online = AccountUpdate(
+            address: address(1), account: account(address(1), amount: 1),
+            keyExpiry: keyExpiry(roundsRemaining: 900_000))
+        let suspended = AccountUpdate(
+            address: address(2), account: account(address(2), status: .offline, amount: 1),
+            keyExpiry: lapsed)
+
+        let both = PortfolioSummary(entries: [online, suspended], roundTime: roundTime)
+        #expect(both.closestKeyExpiry == 2_700_000)  // 900,000 rounds at 3 s
+        let alone = PortfolioSummary(entries: [suspended], roundTime: roundTime)
+        #expect(alone.closestKeyExpiry == nil)
+    }
+
     @Test("a headroom already past zero still wins")
     func negativeHeadroomWins() {
         let summary = PortfolioSummary(

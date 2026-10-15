@@ -297,12 +297,13 @@ enum Format {
 }
 
 extension AccountState {
-    /// Online, eligibility and overall health as one phrase, shared by the
+    /// Online, earning and overall health as one phrase, shared by the
     /// account's card and its row in the list, so the two cannot word the same
-    /// state two ways.
+    /// state two ways. "Earning" follows the alerts: an account outside the
+    /// payout window does not earn, however eligible it is.
     var statusText: String {
         switch status {
-        case .online: incentiveEligible == true ? "Online and earning" : "Online, not earning"
+        case .online: earnsPayouts() ? "Online and earning" : "Online, not earning"
         case .offline: "Offline"
         case .notParticipating: "Not participating"
         }
@@ -310,7 +311,7 @@ extension AccountState {
 
     var statusTint: Color {
         switch status {
-        case .online: incentiveEligible == true ? .green : .orange
+        case .online: earnsPayouts() ? .green : .orange
         case .offline: .red
         case .notParticipating: .secondary
         }

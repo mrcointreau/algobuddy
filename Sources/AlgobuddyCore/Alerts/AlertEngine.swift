@@ -31,6 +31,15 @@ public func quantity(_ value: Double, _ unit: String, decimals: Int = 0) -> Stri
     return text == "1" ? "\(text) \(unit)" : "\(text) \(unit)s"
 }
 
+/// A span of time in days to one decimal down to one day, then in hours, then
+/// in minutes, never fewer than one. Below a day, days to one decimal would
+/// read "about 0.0 days" with most of an hour still left.
+func duration(_ seconds: TimeInterval) -> String {
+    if seconds >= 86_400 { return quantity(seconds / 86_400, "day", decimals: 1) }
+    if seconds >= 3_600 { return quantity(seconds / 3_600, "hour") }
+    return quantity(max(1, seconds / 60), "minute")
+}
+
 /// What a cooldown is held against: the rule, and the account it holds for.
 ///
 /// Both halves are needed. Several accounts can be watched at once and every
@@ -244,7 +253,7 @@ public struct AlertEngine: Sendable {
         }
 
         if let absence = snapshot.absence {
-            let days = absence.headroom(roundTime: snapshot.roundTime) / 86_400
+            let headroomText = duration(absence.headroom(roundTime: snapshot.roundTime))
             if absence.isAbsent {
                 alerts.append(
                     HealthAlert(
@@ -259,7 +268,7 @@ public struct AlertEngine: Sendable {
                         id: .absenceHeadroom, severity: .critical,
                         title: "Absence limit near",
                         body:
-                            "The account can be suspended in about \(quantity(days, "day", decimals: 1)). Check the node is proposing."
+                            "The account can be suspended in about \(headroomText). Check the node is proposing."
                     ))
             } else if absence.ratio >= thresholds.absenceWarningRatio {
                 alerts.append(
@@ -267,13 +276,14 @@ public struct AlertEngine: Sendable {
                         id: .absenceHeadroom, severity: .warning,
                         title: "Absence headroom low",
                         body:
-                            "The account can be suspended in about \(quantity(days, "day", decimals: 1)). Check the node is proposing."
+                            "The account can be suspended in about \(headroomText). Check the node is proposing."
                     ))
             }
         }
 
         if let expiry = snapshot.keyExpiry {
-            let days = expiry.timeRemaining(roundTime: snapshot.roundTime) / 86_400
+            let remaining = expiry.timeRemaining(roundTime: snapshot.roundTime)
+            let days = remaining / 86_400
             if expiry.hasExpired {
                 alerts.append(
                     HealthAlert(
@@ -288,7 +298,7 @@ public struct AlertEngine: Sendable {
                         id: .keyExpiry, severity: .critical,
                         title: "Participation keys expiring",
                         body:
-                            "They expire in about \(quantity(days, "day", decimals: 1)), after which the account stops participating. Generate new keys and register them."
+                            "They expire in about \(duration(remaining)), after which the account stops participating. Generate new keys and register them."
                     ))
             } else if days <= thresholds.keyExpiryWarningDays {
                 alerts.append(

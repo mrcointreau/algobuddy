@@ -139,6 +139,41 @@ struct AlertEngineTests {
                 .first { $0.id == .keyExpiry }?.severity == .critical)
     }
 
+    /// Below a day, a count of days to one decimal reads "about 0.0 days" with
+    /// most of an hour left, so the bodies move to hours, then to minutes.
+    @Test("a deadline under a day is stated in hours or minutes")
+    func shortDeadlinesUseSmallerUnits() {
+        let absence = AbsenceAssessment(
+            allowableLag: 10_000, roundsSinceLastSeen: 9_057, headroomRounds: 943,
+            ratio: 0.9057, isAbsent: false)
+        let near = engine.evaluate(Snapshot(absence: absence)).first { $0.id == .absenceHeadroom }
+        #expect(near?.body.contains("about 44 minutes") == true)
+
+        func expiry(seconds: Double) -> KeyExpiry {
+            KeyExpiry(
+                participation: .init(
+                    voteFirstValid: 0, voteLastValid: 1_000_000 + UInt64(seconds / 2.8),
+                    voteKeyDilution: 1),
+                currentRound: 1_000_000)
+        }
+        let hours = engine.evaluate(Snapshot(keyExpiry: expiry(seconds: 5 * 3_600)))
+            .first { $0.id == .keyExpiry }
+        #expect(hours?.body.contains("about 5 hours") == true)
+        let days = engine.evaluate(Snapshot(keyExpiry: expiry(seconds: 2.5 * 86_400)))
+            .first { $0.id == .keyExpiry }
+        #expect(days?.body.contains("about 2.5 days") == true)
+    }
+
+    @Test("a duration is told in days, then hours, then minutes, never fewer than one")
+    func durationUnits() {
+        #expect(duration(2.5 * 86_400) == "2.5 days")
+        #expect(duration(86_400) == "1.0 days")
+        #expect(duration(5 * 3_600) == "5 hours")
+        #expect(duration(3_600) == "1 hour")
+        #expect(duration(44 * 60) == "44 minutes")
+        #expect(duration(20) == "1 minute")
+    }
+
     @Test("expired keys are critical regardless of the countdown")
     func keyExpired() {
         let expiry = KeyExpiry(

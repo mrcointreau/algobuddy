@@ -324,6 +324,28 @@ struct ChainPollerTests {
         #expect(update.only?.challenge != nil)
     }
 
+    /// The stale-supply reuse itself: a supply fetched once and then failing
+    /// to refresh keeps feeding the absence assessment, and with it the most
+    /// consequential alert the app raises.
+    @Test("a failed supply refresh keeps the cached denominator")
+    func failedSupplyRefreshKeepsCache() async throws {
+        let stub = StubFetcher()
+        let clock = TestClock()
+        standardRoutes(stub, seed: nonMatchingSeed)
+        let poller = makePoller(stub: stub, clock: clock)
+        let fresh = try #require(await poller.pollOnce().only?.absence)
+
+        stub.route("/v2/ledger/supply", status: 500, json: "{}")
+        clock.advance(301)
+        let update = await poller.pollOnce()
+
+        // Two supply requests show the refresh was attempted, so the
+        // assessment below came from the cache rather than from a skipped fetch.
+        #expect(stub.requestCount(containing: "/v2/ledger/supply") == 2)
+        #expect(update.failure?.stage == .supply)
+        #expect(update.only?.absence == fresh)
+    }
+
     @Test("a mistyped address reports not-found rather than a generic error")
     func notFound() async throws {
         let stub = StubFetcher()
@@ -413,6 +435,34 @@ struct ChainPollerTests {
         await poller.refresh()
 
         #expect(stub.requestCount(containing: "/v2/accounts/") == 0)
+    }
+
+    /// The loop and a manual refresh share one in-flight guard. A refresh that
+    /// started a second cycle beside a slow one would duplicate every request,
+    /// count a failure twice, and could publish an older update after a newer
+    /// one.
+    @Test("a refresh during an in-flight cycle starts no second poll")
+    func refreshDuringCycleIsSkipped() async throws {
+        let stub = StubFetcher()
+        standardRoutes(stub, seed: nonMatchingSeed)
+        let gate = FirstRequestGate(stub)
+        let poller = ChainPoller(
+            config: ChainPollerConfig(address: address),
+            algod: AlgodClient(baseURL: URL(string: "https://chain.example")!, fetcher: gate),
+            dates: TestClock())
+
+        await poller.start()
+        // The refresh below must land while the loop's first cycle is in
+        // flight, so wait until that cycle is held on its account request.
+        var held = gate.firstHeld.makeAsyncIterator()
+        _ = await held.next()
+
+        await poller.refresh()
+        let accountRequests = gate.accountRequestCount
+
+        gate.open()
+        await poller.stop()
+        #expect(accountRequests == 1)
     }
 
     /// A 200 whose header lacks a seed must not stamp the window as fetched:

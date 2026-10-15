@@ -94,6 +94,64 @@ final class StubFetcher: HTTPFetching, @unchecked Sendable {
     }
 }
 
+/// Holds the first account request until released and lets every later one
+/// through, so a test can act while a cycle is suspended mid-flight. Letting
+/// later requests through is what turns a second, concurrent cycle into a
+/// countable request rather than a deadlock.
+final class FirstRequestGate: HTTPFetching, @unchecked Sendable {
+    private let inner: StubFetcher
+    private let lock = NSLock()
+    private var accountRequests = 0
+    private var isOpen = false
+    private var held: CheckedContinuation<Void, Never>?
+
+    /// Yields once the first account request is being held.
+    let firstHeld: AsyncStream<Void>
+    private let firstHeldContinuation: AsyncStream<Void>.Continuation
+
+    init(_ inner: StubFetcher) {
+        self.inner = inner
+        (firstHeld, firstHeldContinuation) = AsyncStream.makeStream()
+    }
+
+    var accountRequestCount: Int { lock.withLock { accountRequests } }
+
+    func open() {
+        let waiting = lock.withLock { () -> CheckedContinuation<Void, Never>? in
+            isOpen = true
+            let waiting = held
+            held = nil
+            return waiting
+        }
+        waiting?.resume()
+    }
+
+    func get(
+        _ url: URL, headers: [String: String], timeout: TimeInterval
+    ) async throws -> (Data, Int) {
+        let isFirstAccountRequest = lock.withLock { () -> Bool in
+            guard url.absoluteString.contains("/v2/accounts/") else { return false }
+            accountRequests += 1
+            return accountRequests == 1
+        }
+        if isFirstAccountRequest {
+            await withCheckedContinuation { continuation in
+                let proceed = lock.withLock { () -> Bool in
+                    if isOpen { return true }
+                    held = continuation
+                    return false
+                }
+                if proceed {
+                    continuation.resume()
+                } else {
+                    firstHeldContinuation.yield()
+                }
+            }
+        }
+        return try await inner.get(url, headers: headers, timeout: timeout)
+    }
+}
+
 enum JSONBuilder {
     static func account(
         address: String = "ADDR",

@@ -276,3 +276,30 @@ struct AlertEngineTests {
         #expect(alerts.about(second, includingWatchAlerts: false).map(\.id) == [.accountOffline])
     }
 }
+
+/// The storage key is the only way persisted cooldowns come back after a
+/// relaunch, so a key that fails to read back silently drops all of them, and
+/// every condition still holding is announced again.
+@Suite("Alert keys")
+struct AlertKeyTests {
+    let address = try! AlgorandAddress(
+        "3XBSYFKN4BT5HYBJ7V6VVJUYHYUVD5P7CAR77ZMCJSCK4LHLZLHDLYN2WQ")
+
+    @Test("every rule reads back, for an account and for the watch")
+    func roundTrip() {
+        for id in AlertID.allCases {
+            for key in [AlertKey(address: address, id: id), AlertKey(address: nil, id: id)] {
+                #expect(AlertKey(storageKey: key.storageKey) == key)
+            }
+        }
+    }
+
+    /// Each of these lacks a part that `storageKey` always writes, or names a
+    /// rule or an address that does not exist.
+    @Test("a string that storageKey did not write reads back as nil")
+    func foreignStrings() {
+        for text in ["", "keyExpiry", "|noSuchRule", "NOTANADDRESS|keyExpiry", "|keyExpiry|x"] {
+            #expect(AlertKey(storageKey: text) == nil)
+        }
+    }
+}

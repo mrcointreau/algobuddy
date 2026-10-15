@@ -23,21 +23,42 @@ public enum WatchList {
             .filter { !$0.isEmpty }
     }
 
+    /// One edited row: what it says now, and the account it held when the list
+    /// was last applied.
+    public struct Row: Sendable {
+        public var text: String
+        public var held: AlgorandAddress?
+
+        public init(text: String, held: AlgorandAddress? = nil) {
+            self.text = text
+            self.held = held
+        }
+
+        /// The account this row watches: the one its text names, or, while the
+        /// text names none, the one it held, so an edit in progress leaves its
+        /// account watched. A blank row watches nothing, which is how clearing
+        /// a row removes its account.
+        public var watched: AlgorandAddress? {
+            let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { return nil }
+            return (try? AlgorandAddress(trimmed)) ?? held
+        }
+    }
+
     /// The accounts a list of edited rows amounts to.
     ///
     /// A blank row is skipped rather than refused: a row added and not yet
     /// typed into is not a mistake, and rejecting the whole list over it would
-    /// stop the completed rows from being watched. Repeats are dropped, keeping
-    /// the first, because the same address twice would cost two fetches a cycle
-    /// and appear twice on every surface.
-    ///
-    /// - Throws: the first unparseable row's `AlgorandAddress.AddressError`, so
-    ///   a caller can leave a running watch alone while a row is half typed.
-    public static func resolve(_ rows: [String]) throws -> [AlgorandAddress] {
+    /// stop the completed rows from being watched. A half-typed row stands for
+    /// the account it held, or for none, so it holds back nothing else: a
+    /// removal or an addition made beside it still applies. Repeats are
+    /// dropped, keeping the first, because the same address twice would cost
+    /// two fetches a cycle and appear twice on every surface.
+    public static func resolve(_ rows: [Row]) -> [AlgorandAddress] {
         var seen = Set<AlgorandAddress>()
         var resolved = [AlgorandAddress]()
-        for row in rows where !row.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            let address = try AlgorandAddress(row)
+        for row in rows {
+            guard let address = row.watched else { continue }
             if seen.insert(address).inserted { resolved.append(address) }
         }
         return resolved

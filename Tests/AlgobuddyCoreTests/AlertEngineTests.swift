@@ -302,4 +302,28 @@ struct AlertKeyTests {
             #expect(AlertKey(storageKey: text) == nil)
         }
     }
+
+    /// Stable, so a reminder replaces the banner it follows; distinct per
+    /// account and rule, so one account's banner never replaces another's;
+    /// and free of the address, which the notification store would otherwise
+    /// keep after the app's own preferences are gone.
+    @Test("the notification identifier is stable, distinct and names no address")
+    func notificationIdentifier() {
+        let other = ChainPollerTests.filledAddress(0x31)
+        let keys = [
+            AlertKey(address: address, id: .keyExpiry),
+            AlertKey(address: address, id: .accountOffline),
+            AlertKey(address: other, id: .keyExpiry),
+            AlertKey(address: nil, id: .chainSourceUnreachable),
+        ]
+        let identifiers = keys.map(\.notificationIdentifier)
+
+        #expect(identifiers == keys.map(\.notificationIdentifier))
+        #expect(Set(identifiers).count == keys.count)
+        // A short lowercase digest has no room for a 58-character address.
+        for identifier in identifiers {
+            #expect(identifier.count == 24)
+            #expect(identifier.allSatisfy { $0.isHexDigit && !$0.isUppercase })
+        }
+    }
 }

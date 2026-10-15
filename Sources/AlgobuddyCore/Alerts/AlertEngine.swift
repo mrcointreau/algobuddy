@@ -66,6 +66,17 @@ public struct AlertKey: Hashable, Sendable {
             return nil
         }
     }
+
+    /// The key as an identifier for the system's notification store. The same
+    /// account and rule always give the same identifier, so a reminder or an
+    /// escalation replaces the banner it follows. It is a digest rather than
+    /// `storageKey`, because delivered notifications outlive the app's own
+    /// preferences, and the store should not keep the address once those are
+    /// gone.
+    public var notificationIdentifier: String {
+        SHA512_256.hash(Array(storageKey.utf8)).prefix(12)
+            .map { String(format: "%02x", $0) }.joined()
+    }
 }
 
 public struct HealthAlert: Sendable, Equatable, Identifiable {

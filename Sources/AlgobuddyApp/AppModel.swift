@@ -774,9 +774,11 @@ final class AppModel {
         }
         content.sound = alert.severity == .critical ? .default : nil
 
+        // One identifier per account and rule, so a reminder or an escalation
+        // replaces the banner it follows instead of stacking up beside it.
         UNUserNotificationCenter.current().add(
             UNNotificationRequest(
-                identifier: "\(alert.id.rawValue)-\(Date().timeIntervalSince1970)",
+                identifier: alert.key.notificationIdentifier,
                 content: content,
                 trigger: nil))
     }

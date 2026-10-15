@@ -139,12 +139,48 @@ struct SettingsView: View {
         // nothing, until the pane was next opened.
         .background(CommitOnClose { model.apply() })
         .formStyle(.grouped)
-        // A grouped Form is a scroll view underneath, and a scroll view reports a
-        // small ideal height, the same trap as the panel. Taking the content's
-        // height instead lets `.windowResizability(.contentSize)` fit the window
-        // exactly, so there is nothing left to scroll.
-        .fixedSize(horizontal: false, vertical: true)
+        // The form takes one height whatever the window offers, so
+        // `.windowResizability(.contentSize)` fits the window to it exactly,
+        // and the form scrolls only when the screen is too short for it.
+        .modifier(FitsScreenHeight())
         .frame(width: 480)
+    }
+}
+
+/// Gives the form its content's height, up to the height of the screen less
+/// the window's title bar. Every account adds a row, and a window taller than
+/// the screen leaves its lower controls out of reach.
+private struct FitsScreenHeight: ViewModifier {
+    func body(content: Content) -> some View {
+        Fit(limit: Self.limit) { content }
+    }
+
+    /// Asked for its size with no height proposed, a grouped form answers with
+    /// its content's height, so it is measured there and placed at no more
+    /// than the limit, where it scrolls. Unlike the panel's scroll view, the
+    /// form needs no hidden copy to be measured.
+    private struct Fit: Layout {
+        let limit: CGFloat
+
+        func sizeThatFits(
+            proposal: ProposedViewSize, subviews: Subviews, cache: inout ()
+        ) -> CGSize {
+            let natural = subviews[0].sizeThatFits(
+                ProposedViewSize(width: proposal.width, height: nil))
+            return CGSize(
+                width: proposal.width ?? natural.width, height: min(natural.height, limit))
+        }
+
+        func placeSubviews(
+            in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()
+        ) {
+            subviews[0].place(at: bounds.origin, proposal: ProposedViewSize(bounds.size))
+        }
+    }
+
+    private static var limit: CGFloat {
+        let titleBar = NSWindow.frameRect(forContentRect: .zero, styleMask: .titled).height
+        return (NSScreen.main?.visibleFrame.height ?? 800) - titleBar
     }
 }
 
@@ -453,6 +489,14 @@ struct AddressField: View {
         }
     }
 
+    /// What a text that names no account means for the watch, which the row
+    /// would not otherwise show: it keeps the account it held, or adds none.
+    private var consequence: String? {
+        let trimmed = draft.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, (try? AlgorandAddress(trimmed)) == nil else { return nil }
+        return draft.held == nil ? "Not watched until valid" : "Still watching the previous address"
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 6) {
@@ -473,6 +517,9 @@ struct AddressField: View {
             }
             if let note = validity?.note {
                 Text(note).font(Typography.secondary).foregroundStyle(.secondary)
+            }
+            if let consequence {
+                Text(consequence).font(Typography.secondary).foregroundStyle(.secondary)
             }
         }
     }

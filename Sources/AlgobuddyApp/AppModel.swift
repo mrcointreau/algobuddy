@@ -21,6 +21,9 @@ let log = Logger(subsystem: "dev.algobuddy.app", category: "app")
 struct AddressDraft: Identifiable {
     let id = UUID()
     var text = ""
+    /// The account this row held when the list was last applied, which stays
+    /// watched while the text is mid-edit. See `WatchList.Row`.
+    var held: AlgorandAddress?
 }
 
 @MainActor
@@ -105,14 +108,20 @@ final class AppModel {
     private struct AppliedWatch {
         /// The canonical 58-character addresses, in watch order.
         let addresses: [String]
-        /// The algod URL. What the displayed figures and the notification
-        /// cooldowns are answers about: the same address at another source can
-        /// be another network's account entirely, while the indexer only
-        /// backfills rewards, so changing it alone must not blank figures that
-        /// are still valid.
-        let source: String
+        /// What the displayed figures and the notification cooldowns are
+        /// answers about: the same address at another source can be another
+        /// network's account entirely, while the indexer only backfills
+        /// rewards, so changing it alone must not blank figures that are still
+        /// valid.
+        let algodURL: URL
+        /// Nil when the field is empty, which turns rewards off.
+        let indexerURL: URL?
+
+        var source: String { algodURL.absoluteString }
         /// addresses|algod|indexer: what decides a poller rebuild.
-        let identity: String
+        var identity: String {
+            "\(addresses.joined(separator: ","))|\(source)|\(indexerURL?.absoluteString ?? "")"
+        }
 
         /// Cooldowns are recorded per account inside these, since an `AlertKey`
         /// carries the address it holds for. Keying the bucket on the source
@@ -385,16 +394,16 @@ final class AppModel {
     /// is polled: the address, or a data source URL. A submit that changes
     /// nothing leaves the running poller alone.
     func apply() {
-        // An invalid draft never tears down a running watch, however many rows
-        // there are. Focus can leave a half-typed address or URL at any moment,
-        // and losing monitoring over an edit in progress would silently disable
-        // the one job the app has. Each row's live validation and `sourceError`
-        // say why nothing changed; the poller keeps watching the last valid
-        // configuration, and what is persisted stays exactly what is running.
-        //
-        // The row's own validation names an unparseable address; a second
-        // phrasing here would stack beneath it.
-        guard let addresses = try? WatchList.resolve(addressDrafts.map(\.text)) else { return }
+        // A field mid-edit never tears down what it watches, and never holds
+        // back the fields beside it. Focus can leave a half-typed address or
+        // URL at any moment, and losing monitoring over an edit in progress
+        // would silently disable the one job the app has, so such a row keeps
+        // the account it held and such a URL the one last applied, while a
+        // removal or an edit made beside them still applies. The row's own
+        // note and `sourceError` say what is not yet in effect, and what is
+        // persisted stays exactly what is running.
+        let rows = addressDrafts.map { WatchList.Row(text: $0.text, held: $0.held) }
+        let addresses = WatchList.resolve(rows)
 
         guard !addresses.isEmpty else {
             // Deliberate clearing is persisted; a stored address must not
@@ -403,36 +412,34 @@ final class AppModel {
             UserDefaults.standard.removeObject(forKey: singleAddressKey)
             stopWatching()
             sourceError = nil
+            hold(rows)
             return
         }
-        let algodText = algodURLText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let algodURL = URL(string: algodText), algodURL.scheme != nil else {
-            sourceError = "The algod URL is not valid."
-            return
-        }
-        // The indexer is optional (an empty field just disables rewards), but a
-        // non-empty value that does not parse is an error, said out loud. The
-        // silent alternative is a mistyped URL quietly removing the Proposals
-        // card, which reads as "no proposals" rather than "bad URL".
+        let typedAlgod = SourceURL.parse(algodURLText)
         let indexerText = indexerURLText.trimmingCharacters(in: .whitespacesAndNewlines)
-        let indexerURL: URL?
-        if indexerText.isEmpty {
-            indexerURL = nil
-        } else if let url = URL(string: indexerText), url.scheme != nil {
-            indexerURL = url
+        let typedIndexer = SourceURL.parse(indexerText)
+        // The indexer is optional (an empty field just disables rewards), but a
+        // non-empty value that is not a URL to poll is an error, said out loud.
+        // The silent alternative is a mistyped URL quietly removing the
+        // Proposals card, which reads as "no proposals" rather than "bad URL".
+        let indexerIsValid = indexerText.isEmpty || typedIndexer != nil
+        if typedAlgod == nil {
+            sourceError = "The algod URL is not valid. It needs http:// or https:// and a host."
+        } else if !indexerIsValid {
+            sourceError =
+                "The indexer URL is not valid. It needs http:// or https:// and a host, or it can be left empty."
         } else {
-            sourceError = "The indexer URL is not valid."
-            return
+            sourceError = nil
         }
-        sourceError = nil
+        // Before anything has been applied there is no URL to keep, so nothing
+        // is watched until both are valid.
+        guard let algodURL = typedAlgod ?? applied?.algodURL, indexerIsValid || applied != nil
+        else { return }
+        let indexerURL = indexerIsValid ? typedIndexer : applied?.indexerURL
 
         let watched = addresses.map(\.stringValue)
-        let next = AppliedWatch(
-            addresses: watched,
-            source: algodURL.absoluteString,
-            identity:
-                "\(watched.joined(separator: ","))|\(algodURL.absoluteString)|\(indexerURL?.absoluteString ?? "")"
-        )
+        let next = AppliedWatch(addresses: watched, algodURL: algodURL, indexerURL: indexerURL)
+        hold(rows)
         // When nothing changed, the running poller is left in peace; a focus
         // change or an identical re-submit costs no writes and no teardown.
         if next.identity == applied?.identity, isRunning { return }
@@ -447,8 +454,8 @@ final class AppModel {
         // cleared as it is taken up into it. Left behind, it would outlive the
         // moment the user takes that account off the list.
         defaults.removeObject(forKey: singleAddressKey)
-        defaults.set(algodText, forKey: "algodURL")
-        defaults.set(indexerText, forKey: "indexerURL")
+        defaults.set(algodURL.absoluteString, forKey: "algodURL")
+        defaults.set(indexerURL?.absoluteString ?? "", forKey: "indexerURL")
 
         stop()
         // The displayed figures are answers about the accounts on the list, at
@@ -656,6 +663,14 @@ final class AppModel {
     }
 
     // MARK: - Editing the list
+
+    /// Records the account each row watches now. A row keeps it through a
+    /// later edit, until its text names another account or is cleared.
+    private func hold(_ rows: [WatchList.Row]) {
+        for (index, row) in zip(addressDrafts.indices, rows) {
+            addressDrafts[index].held = row.watched
+        }
+    }
 
     /// Appends a row and reports it, so the caller can put the cursor in it.
     /// Nothing is applied: an empty row watches nothing, and the poller has no

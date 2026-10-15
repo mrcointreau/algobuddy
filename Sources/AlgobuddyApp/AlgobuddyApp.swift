@@ -31,7 +31,8 @@ struct AlgobuddyApp: App {
         }
         // HIG: "a settings window accommodates the size of the current pane, [so]
         // people don't need to expand the window to see more." Sizing to
-        // content is what keeps a scrollbar out of the form.
+        // content keeps a scrollbar out of the form unless the screen is too
+        // short for it.
         .windowResizability(.contentSize)
     }
 }

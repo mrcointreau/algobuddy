@@ -25,6 +25,8 @@ Monitoring contacts exactly two hosts, both configurable in Settings:
 - an algod endpoint, for `/v2/accounts`, `/v2/ledger/supply` and `/v2/blocks`
 - an indexer endpoint, for `/v2/block-headers`
 
+Every request goes through one private session that keeps no HTTP cache and no cookies, gives up on a request after 60 seconds, and follows a redirect only within the host it asked, never from https down to http. A redirect anywhere else is refused, so monitoring never reaches past the two hosts you configured, and requests whose URLs name your addresses leave nothing on disk.
+
 One further host is contacted only when you ask for it. **Check for Updates** in Settings makes a single anonymous `GET` to `api.github.com` for this repository's latest release tag. It sends no token, no address and nothing else about you; it happens on that click and at no other time, since there is no background check, no timer and no stored result. The answer is a version number and a link: **nothing is downloaded and nothing is executed**. Updating remains `git pull && make install`, run by you.
 
 No telemetry, no analytics, no crash reporting, and no third-party SDKs. The `dependencies` array in `Package.swift` is empty, so there is no supply chain beyond the Swift toolchain itself.

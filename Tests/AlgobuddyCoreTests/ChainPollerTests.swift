@@ -357,6 +357,28 @@ struct ChainPollerTests {
         #expect(update.failure?.message.contains("address") == true)
     }
 
+    /// The private session refuses a redirect to another host. The panel must
+    /// say so, rather than report an outage or blame the address.
+    @Test("a refused redirect is reported as such")
+    func refusedRedirectIsReported() async throws {
+        struct Redirecting: HTTPFetching {
+            func get(
+                _ url: URL, headers: [String: String], timeout: TimeInterval
+            ) async throws -> (Data, Int) {
+                throw AlgodError.redirectRefused
+            }
+        }
+        let poller = ChainPoller(
+            config: ChainPollerConfig(address: address),
+            algod: AlgodClient(
+                baseURL: URL(string: "https://chain.example")!, fetcher: Redirecting()),
+            dates: TestClock())
+
+        let update = await poller.pollOnce()
+
+        #expect(update.failure?.message.contains("only contacts the configured hosts") == true)
+    }
+
     /// A seed is only meaningful for the window it was fetched for. Evaluating a
     /// stale one manufactures a critical "challenged and not answered" for a
     /// window that closed long ago.

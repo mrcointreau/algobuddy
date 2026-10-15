@@ -108,9 +108,14 @@ uninstall:
 	$(QUIT_APP)
 	rm -rf "$(PREFIX)/$(APP)"
 
-# Everything `uninstall` does, plus the stored address and preferences.
+# Everything `uninstall` does, plus the stored addresses and preferences, and
+# what macOS keeps for the app under its identifier: an HTTP cache and a cookie
+# store, where request URLs would name the watched addresses.
 purge: uninstall
 	-defaults delete dev.algobuddy.app
+	rm -rf "$(HOME)/Library/Caches/dev.algobuddy.app" \
+		"$(HOME)/Library/HTTPStorages/dev.algobuddy.app" \
+		"$(HOME)/Library/HTTPStorages/dev.algobuddy.app.binarycookies"
 
 # Launch the bundled app rather than the bare binary, so notifications work.
 run: bundle

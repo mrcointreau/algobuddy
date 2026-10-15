@@ -327,6 +327,13 @@ final class AppModel {
     // MARK: - Lifecycle
 
     func load() {
+        // Every request goes through the private session, so nothing in the
+        // shared URL cache or the shared cookie store is needed, and a response
+        // cached there would be keyed by a URL that names a watched address.
+        // Both are emptied.
+        URLCache.shared.removeAllCachedResponses()
+        HTTPCookieStorage.shared.removeCookies(since: .distantPast)
+
         let defaults = UserDefaults.standard
         // A store that holds one address rather than a list still names one
         // watched account, and comes through as that account with nothing asked

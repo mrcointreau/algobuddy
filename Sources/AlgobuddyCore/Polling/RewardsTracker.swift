@@ -34,10 +34,19 @@ public struct RewardsTracker: Sendable, Equatable {
 
     public var count: Int { blocks.count }
 
+    /// - Parameter latestRound: The newest round the chain itself has reported.
+    ///   A block past it is either corrupt or simply early, from an indexer a
+    ///   round or two ahead of the algod that answered. Dropping it costs
+    ///   nothing, because the next fetch resumes before it. Keeping a corrupt
+    ///   one would move `highestRound` past every real proposal still to come,
+    ///   and the incremental fetch would never ask for them.
     public mutating func ingest(
-        _ proposed: [IndexerClient.ProposedBlock], windowStartRound: UInt64?
+        _ proposed: [IndexerClient.ProposedBlock], windowStartRound: UInt64?,
+        latestRound: UInt64? = nil
     ) {
-        for block in proposed { blocks[block.round] = block }
+        for block in proposed where latestRound.map({ block.round <= $0 }) ?? true {
+            blocks[block.round] = block
+        }
         if let windowStartRound {
             self.windowStartRound = windowStartRound
             // Drop anything older than the window being claimed, so a summary

@@ -535,6 +535,83 @@ struct ChainPollerTests {
         #expect(calls[1].contains("min-round=64029001"))
     }
 
+    /// The indexer is user-configured, so its rounds are not trusted. A block
+    /// past the chain tip must neither crash the poller when the next fetch
+    /// resumes past it nor become the resume point that hides every real
+    /// proposal after it.
+    @Test("indexer rounds past the chain tip are ignored")
+    func futureIndexerRoundsAreIgnored() async throws {
+        let stub = StubFetcher()
+        let clock = TestClock()
+        standardRoutes(stub, seed: nonMatchingSeed)
+        stub.route(
+            "/v2/block-headers",
+            json: JSONBuilder.blockHeaders(
+                [
+                    (round: 64_029_000, timestamp: 1_785_996_400, payout: 8_000_000),
+                    (round: 65_030_100, timestamp: 1_785_996_400, payout: 8_000_000),
+                    (round: .max, timestamp: 1_785_996_400, payout: 8_000_000),
+                ], proposer: Self.addressString))
+        let poller = makePoller(stub: stub, clock: clock, withIndexer: true)
+
+        _ = await poller.pollOnce()
+        clock.advance(301)
+        let update = await poller.pollOnce()
+
+        let calls = stub.requests.filter { $0.contains("/v2/block-headers") }
+        #expect(calls.count == 2)
+        #expect(calls[1].contains("min-round=64029001"))
+        #expect(update.only?.rewards?.proposals24h == 1)
+    }
+
+    /// An indexer can run a round or two ahead of the algod backend that
+    /// answered. Its newest block is dropped for one cycle and counted at the
+    /// next rewards fetch, so a real proposal is never lost.
+    @Test("a block from an indexer ahead of algod is counted once algod catches up")
+    func earlyIndexerBlockIsCountedLater() async throws {
+        let stub = StubFetcher()
+        let clock = TestClock()
+        standardRoutes(stub, round: 64_030_100, seed: nonMatchingSeed)
+        stub.route(
+            "/v2/block-headers",
+            json: JSONBuilder.blockHeaders(
+                [(round: 64_030_101, timestamp: 1_785_996_400, payout: 8_000_000)],
+                proposer: Self.addressString))
+        let poller = makePoller(stub: stub, clock: clock, withIndexer: true)
+
+        let early = await poller.pollOnce()
+        #expect(early.only?.rewards?.proposals24h == 0)
+
+        standardRoutes(stub, round: 64_030_200, seed: nonMatchingSeed)
+        clock.advance(301)
+        let caughtUp = await poller.pollOnce()
+        #expect(caughtUp.only?.rewards?.proposals24h == 1)
+    }
+
+    /// Both endpoints are user-configured. Even when algod itself reports the
+    /// largest round there is, and the indexer a block at it, the resume step
+    /// must saturate rather than trap.
+    @Test("the rewards resume step saturates at the largest round")
+    func resumeStepSaturates() async throws {
+        let stub = StubFetcher()
+        let clock = TestClock()
+        standardRoutes(stub, round: .max, seed: nonMatchingSeed, lastSeen: .max - 50)
+        stub.route(
+            "/v2/block-headers",
+            json: JSONBuilder.blockHeaders(
+                [(round: .max, timestamp: 1_785_996_400, payout: 8_000_000)],
+                proposer: Self.addressString))
+        let poller = makePoller(stub: stub, clock: clock, withIndexer: true)
+
+        _ = await poller.pollOnce()
+        clock.advance(301)
+        _ = await poller.pollOnce()
+
+        let calls = stub.requests.filter { $0.contains("/v2/block-headers") }
+        #expect(calls.count == 2)
+        #expect(calls.last?.contains("min-round=\(UInt64.max)") == true)
+    }
+
     /// With notifications off the dispatcher is not consulted at all: a
     /// cooldown stamped for a notification nobody saw would swallow the first
     /// real one after they are turned back on.

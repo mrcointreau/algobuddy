@@ -413,6 +413,22 @@ struct RewardsTrackerTests {
         #expect(tracker.highestRound == 90)
     }
 
+    /// A round past the chain's own latest is early at best and corrupt at
+    /// worst. Kept, a corrupt one would become the resume point and hide every
+    /// real proposal after it.
+    @Test("drops blocks past the latest round")
+    func dropsFutureRounds() {
+        var tracker = RewardsTracker()
+        tracker.ingest(
+            [
+                block(10, hoursAgo: 1, payout: 1),
+                block(5_000_000, hoursAgo: 1, payout: 1),
+                block(.max, hoursAgo: 1, payout: 1),
+            ], windowStartRound: 0, latestRound: 1_000)
+        #expect(tracker.count == 1)
+        #expect(tracker.highestRound == 10)
+    }
+
     @Test("an empty tracker summarises to zero, not nil")
     func empty() {
         let summary = RewardsTracker().summary(now: now)

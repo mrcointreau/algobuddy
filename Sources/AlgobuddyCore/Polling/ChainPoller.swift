@@ -315,9 +315,10 @@ public actor ChainPoller {
                 // re-downloading the whole window every cycle: blocks are
                 // immutable, so anything held cannot have changed, and a
                 // previously truncated fetch picks its tail back up from here.
-                return ProposalRequest(
-                    address: address,
-                    minRound: max(windowStart, state.tracker.highestRound.map { $0 + 1 } ?? 0))
+                // The step saturates rather than traps, because the round comes
+                // from a user-configured endpoint.
+                let resume = state.tracker.highestRound.map { $0 < .max ? $0 + 1 : $0 } ?? 0
+                return ProposalRequest(address: address, minRound: max(windowStart, resume))
             }
 
         async let supplyFetch = Self.attempt(needSupply ? algod : nil) { try await $0.supply() }
@@ -368,7 +369,7 @@ public actor ChainPoller {
             switch result {
             case .success(let page):
                 var state = rewards[address] ?? AccountRewards()
-                state.tracker.ingest(page.blocks, windowStartRound: windowStart)
+                state.tracker.ingest(page.blocks, windowStartRound: windowStart, latestRound: round)
                 state.isTruncated = page.truncated
                 state.fetchedAt = now
                 rewards[address] = state

@@ -62,6 +62,22 @@ struct RoundClockTests {
         #expect(clock.sampleCount == 1)
         #expect(abs(clock.estimate - 2.8) < 0.01)
     }
+
+    /// Each 30 s poll sees 10 or 11 whole rounds of 2.8 s, a swing of about 5%
+    /// per sample. Once the rounds have been watched long enough, the estimate
+    /// comes from the whole span and stays within a small fraction of a percent.
+    @Test("a long span removes the poll-to-poll swing")
+    func longSpanIsSteady() {
+        var clock = RoundClock()
+        var worst = 0.0
+        for poll in 0...(3 * 120) {
+            let elapsed = Double(poll) * 30
+            clock.observe(
+                round: 1_000 + UInt64(elapsed / 2.8), at: start.addingTimeInterval(elapsed))
+            if elapsed >= 75 * 60 { worst = max(worst, abs(clock.estimate - 2.8)) }
+        }
+        #expect(worst < 0.003)
+    }
 }
 
 @Suite("Alert dispatcher")
@@ -88,11 +104,36 @@ struct AlertDispatcherTests {
         #expect(dispatcher.dispatch([alert()], now: start.addingTimeInterval(800)).isEmpty)
     }
 
-    @Test("it notifies again once the cooldown lapses")
-    func refires() {
+    /// A challenge left unanswered can suspend the account within minutes, so
+    /// it repeats at the cooldown for as long as it holds.
+    @Test("an urgent alert reminds once the cooldown lapses")
+    func urgentReminds() {
+        var dispatcher = AlertDispatcher(cooldown: 900)
+        let challenge = alert(.challengeFailing, .critical)
+        _ = dispatcher.dispatch([challenge], now: start)
+        #expect(dispatcher.dispatch([challenge], now: start.addingTimeInterval(901)).count == 1)
+    }
+
+    /// Keys that expire in two weeks are worth a daily reminder, not one every
+    /// fifteen minutes for eleven days.
+    @Test("a key-expiry warning reminds once a day")
+    func keyWarningRemindsDaily() {
         var dispatcher = AlertDispatcher(cooldown: 900)
         _ = dispatcher.dispatch([alert()], now: start)
-        #expect(dispatcher.dispatch([alert()], now: start.addingTimeInterval(901)).count == 1)
+        #expect(dispatcher.dispatch([alert()], now: start.addingTimeInterval(901)).isEmpty)
+        #expect(dispatcher.dispatch([alert()], now: start.addingTimeInterval(86_401)).count == 1)
+    }
+
+    /// An account can be Offline by choice for months. It is announced when it
+    /// appears, and the menu bar and the panel carry it from there.
+    @Test("an Offline account never reminds while it holds")
+    func offlineNeverReminds() {
+        var dispatcher = AlertDispatcher(cooldown: 900)
+        let offline = alert(.accountOffline, .critical)
+        #expect(dispatcher.dispatch([offline], now: start).count == 1)
+        for elapsed: TimeInterval in [901, 86_401, 30 * 86_400] {
+            #expect(dispatcher.dispatch([offline], now: start.addingTimeInterval(elapsed)).isEmpty)
+        }
     }
 
     /// The cooldown is persisted across launches; the severity must be too, or
@@ -181,6 +222,103 @@ struct AlertDispatcherTests {
         let notified = dispatcher.dispatch(
             [alert(.keyExpiry), alert(.notEarning)], now: start.addingTimeInterval(10))
         #expect(notified.map(\.id) == [.notEarning])
+    }
+
+    /// A countdown read through a noisy round-time estimate can sit on either
+    /// side of a threshold from one poll to the next. Its first rise is
+    /// announced; every later one only returns to what the user was told.
+    @Test("a severity that wobbles across a threshold notifies its rise once")
+    func wobbleNotifiesOnce() {
+        var dispatcher = AlertDispatcher(cooldown: 900)
+        _ = dispatcher.dispatch([alert(.keyExpiry, .warning)], now: start)
+        var notified = 0
+        for step in 1...20 {
+            let severity: AlertSeverity = step.isMultiple(of: 2) ? .warning : .critical
+            let at = start.addingTimeInterval(Double(step) * 30)
+            notified += dispatcher.dispatch([alert(.keyExpiry, severity)], now: at).count
+        }
+        #expect(notified == 1)
+    }
+
+    /// A condition counts as cleared only once it has stayed gone for the
+    /// cooldown. A shorter gap is the condition wobbling on its threshold, and
+    /// announcing each return would be exactly the noise the cooldown prevents.
+    @Test("a condition notifies on its return only after staying gone for the cooldown")
+    func returnAfterStayingGone() {
+        var dispatcher = AlertDispatcher(cooldown: 900)
+        let offline = alert(.accountOffline, .critical)
+        _ = dispatcher.dispatch([offline], now: start)
+        _ = dispatcher.dispatch([], now: start.addingTimeInterval(30))
+        #expect(dispatcher.dispatch([offline], now: start.addingTimeInterval(600)).isEmpty)
+        _ = dispatcher.dispatch([], now: start.addingTimeInterval(630))
+        #expect(dispatcher.dispatch([offline], now: start.addingTimeInterval(1_200)).isEmpty)
+        _ = dispatcher.dispatch([], now: start.addingTimeInterval(1_230))
+        #expect(dispatcher.dispatch([offline], now: start.addingTimeInterval(2_200)).count == 1)
+    }
+
+    /// A key countdown near fourteen days can drop in and out of its warning
+    /// from one poll to the next for as long as the estimate needs to settle.
+    @Test("a condition that wobbles in and out for hours notifies once")
+    func longWobbleNotifiesOnce() {
+        var dispatcher = AlertDispatcher(cooldown: 900)
+        var notified = 0
+        for step in 0..<240 {
+            let at = start.addingTimeInterval(Double(step) * 30)
+            notified += dispatcher.dispatch(step.isMultiple(of: 2) ? [alert()] : [], now: at).count
+        }
+        #expect(notified == 1)
+    }
+
+    /// A failed fetch says nothing about whether a condition cleared. Counting
+    /// it as cleared would announce the alert afresh after every blip.
+    @Test("only an evaluated account can clear its alerts")
+    func onlyEvaluatedAccountsClear() {
+        let first = ChainPollerTests.filledAddress(0x21)
+        let second = ChainPollerTests.filledAddress(0x22)
+        let both: Set<AlgorandAddress?> = [first, second, nil]
+        let offline = HealthAlert(
+            id: .accountOffline, address: second, severity: .critical, title: "t", body: "b")
+        let later = start.addingTimeInterval(1_000)
+
+        var failedFetch = AlertDispatcher(cooldown: 900)
+        _ = failedFetch.dispatch([offline], evaluated: both, now: start)
+        _ = failedFetch.dispatch([], evaluated: [first, nil], now: start.addingTimeInterval(30))
+        #expect(failedFetch.dispatch([offline], evaluated: both, now: later).isEmpty)
+
+        var cleared = AlertDispatcher(cooldown: 900)
+        _ = cleared.dispatch([offline], evaluated: both, now: start)
+        _ = cleared.dispatch([], evaluated: both, now: start.addingTimeInterval(30))
+        #expect(cleared.dispatch([offline], evaluated: both, now: later).count == 1)
+    }
+
+    /// Relaunching, or rebuilding the poller after a Settings edit, must not
+    /// announce afresh a condition the user was already told about.
+    @Test("a restored notification counts as still holding")
+    func restoredCountsAsHolding() {
+        let offline = alert(.accountOffline, .critical)
+        var dispatcher = AlertDispatcher(
+            cooldown: 900, lastNotified: [offline.key: start],
+            lastSeverity: [offline.key: .critical])
+        #expect(dispatcher.dispatch([offline], now: start.addingTimeInterval(7_200)).isEmpty)
+    }
+
+    @Test("reminder intervals follow the rule and its severity")
+    func reminderIntervals() {
+        let dispatcher = AlertDispatcher(cooldown: 900)
+        let expected: [(AlertID, AlertSeverity, TimeInterval?)] = [
+            (.challengeFailing, .critical, 900),
+            (.absenceHeadroom, .critical, 900),
+            (.absenceHeadroom, .warning, 3_600),
+            (.chainSourceUnreachable, .warning, 3_600),
+            (.keyExpiry, .critical, 21_600),
+            (.keyExpiry, .warning, 86_400),
+            (.accountOffline, .critical, nil),
+            (.notEarning, .warning, nil),
+            (.balanceOutOfRange, .warning, nil),
+        ]
+        for (id, severity, interval) in expected {
+            #expect(dispatcher.reminderInterval(for: alert(id, severity)) == interval)
+        }
     }
 }
 

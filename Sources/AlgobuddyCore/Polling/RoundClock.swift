@@ -13,25 +13,47 @@ public struct SystemDateProvider: DateProviding {
 ///
 /// Every countdown the UI shows (days of key validity, hours of absence
 /// headroom, minutes to a challenge deadline) is rounds multiplied by this. It
-/// starts at the nominal 2.8 s and converges on the observed rate within a few
-/// polls, so early countdowns on a chain with a different round time carry the
-/// nominal figure's error until then.
+/// starts at the nominal 2.8 s and moves towards the observed rate with every
+/// poll, so early countdowns on a chain with a different round time carry part
+/// of the nominal figure's error for the first few minutes. Once the rounds have
+/// been watched for half an hour, the estimate is the rate over that whole span.
 public struct RoundClock: Sendable, Equatable {
     public static let nominal: TimeInterval = 2.8
     /// Samples outside this band are discarded as observation artefacts rather
     /// than folded into the estimate.
     static let plausible: ClosedRange<TimeInterval> = 0.5...30
     static let smoothing = 0.2
+    /// How long the rounds must have been watched before the estimate is the
+    /// rate over the whole span rather than a blend of single polls.
+    static let longSpan: TimeInterval = 30 * 60
+    /// How far back the span reaches once it is long enough. Older starting
+    /// points are dropped, so the estimate still follows a lasting change in
+    /// the round time.
+    static let spanWindow: TimeInterval = 60 * 60
+    static let checkpointSpacing: TimeInterval = 10 * 60
 
-    public private(set) var estimate: TimeInterval = RoundClock.nominal
+    /// Seconds per round: the rate over the long span once there is one, and
+    /// the blend of single-poll samples before that.
+    public var estimate: TimeInterval { spanRate ?? smoothed }
     public private(set) var sampleCount = 0
 
+    private var smoothed = RoundClock.nominal
     private var lastRound: UInt64?
     private var lastObservedAt: Date?
+
+    private struct Observation: Sendable, Equatable {
+        let round: UInt64
+        let date: Date
+    }
+    /// Where the long span can start, oldest first.
+    private var checkpoints: [Observation] = []
+    /// The newest observation whose round advanced, where the span ends.
+    private var newest: Observation?
 
     public init() {}
 
     public mutating func observe(round: UInt64, at date: Date) {
+        extendSpan(round: round, at: date)
         defer {
             lastRound = round
             lastObservedAt = date
@@ -50,7 +72,44 @@ public struct RoundClock: Sendable, Equatable {
         let sample = elapsed / rounds
         guard Self.plausible.contains(sample) else { return }
 
-        estimate = sampleCount == 0 ? sample : estimate + Self.smoothing * (sample - estimate)
+        // Blended from the nominal rather than replaced by the first sample: a
+        // single 30 s poll sees whole rounds only, so one sample can be 7% off
+        // and would move every countdown by as much at each launch.
+        smoothed += Self.smoothing * (sample - smoothed)
         sampleCount += 1
+    }
+
+    /// Each 30 s poll sees 10 or 11 whole rounds, so single samples swing by
+    /// about 5% and their blend still moves by about 1% from poll to poll:
+    /// enough to carry a countdown back and forth across an alert threshold.
+    /// Over half an hour or more, one round either way is a small fraction of
+    /// a percent.
+    private var spanRate: TimeInterval? {
+        guard let first = checkpoints.first, let newest else { return nil }
+        let elapsed = newest.date.timeIntervalSince(first.date)
+        guard elapsed >= Self.longSpan, newest.round > first.round else { return nil }
+        let rate = elapsed / Double(newest.round - first.round)
+        return Self.plausible.contains(rate) ? rate : nil
+    }
+
+    private mutating func extendSpan(round: UInt64, at date: Date) {
+        // A round that does not advance, as a lagging backend can report, says
+        // nothing new about the rate and must not end the span.
+        if let newest, round <= newest.round || date <= newest.date { return }
+        let observation = Observation(round: round, date: date)
+        newest = observation
+
+        if let last = checkpoints.last, date.timeIntervalSince(last.date) < Self.checkpointSpacing {
+            return
+        }
+        checkpoints.append(observation)
+        // The oldest starting point goes only once the next one is a full
+        // window old, so after a long sleep the span still reaches back across
+        // it, and the rate over the sleep holds just as a single sample's does.
+        while checkpoints.count > 1,
+            date.timeIntervalSince(checkpoints[1].date) >= Self.spanWindow
+        {
+            checkpoints.removeFirst()
+        }
     }
 }

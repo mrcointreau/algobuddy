@@ -83,8 +83,8 @@ public actor ChainPoller {
         /// Notification times, for the caller to persist so cooldowns survive a
         /// relaunch. See `AlertDispatcher.init(cooldown:lastNotified:lastSeverity:)`.
         public let alertHistory: [AlertKey: Date]
-        /// Severities at last evaluation, persisted with `alertHistory` so
-        /// escalation detection survives a relaunch too.
+        /// The severity each alert last notified at, persisted with
+        /// `alertHistory` so escalation detection survives a relaunch too.
         public let alertSeverities: [AlertKey: AlertSeverity]
 
         /// Whether any account was actually fetched. A cycle where none were
@@ -127,9 +127,10 @@ public actor ChainPoller {
     private var isStopped = false
     private var pollTask: Task<Void, Never>?
     /// Whether dispatched notifications will actually be shown. When they will
-    /// not, the dispatcher is not consulted at all: stamping a cooldown for a
-    /// notification nobody saw would silence the real one for 15 minutes after
-    /// the user turns notifications back on. A lock rather than actor state, so
+    /// not, the dispatcher is not consulted at all: stamping a notification
+    /// nobody saw would silence the real one after the user turns notifications
+    /// back on, until its next reminder or, for a rule that never reminds, for
+    /// as long as the condition holds. A lock rather than actor state, so
     /// the app's toggle takes effect for the very next dispatch instead of
     /// after a task-scheduling hop during which a poll could still stamp.
     private final class NotificationsGate: @unchecked Sendable {
@@ -439,13 +440,16 @@ public actor ChainPoller {
         }
 
         let sorted = ordered(alerts)
+        // The watch itself counts as evaluated: an account answered, so the
+        // source is reachable and its outage alert has cleared.
+        let evaluated = Set(accounts.keys.map { Optional($0) } + [nil])
         return Update(
             observedAt: now,
             currentRound: round,
             entries: entries,
             roundTime: roundClock.estimate,
             alerts: sorted,
-            notifications: dispatch(sorted, now: now),
+            notifications: dispatch(sorted, evaluated: evaluated, now: now),
             // A shared stage that failed outranks an individual account's
             // failure: it is the one that reaches every entry.
             failure: failure ?? config.addresses.compactMap { failures[$0] }.first,
@@ -541,12 +545,18 @@ public actor ChainPoller {
     }
 
     /// The dispatcher is consulted only when notifications will actually be
-    /// shown. Otherwise its cooldown stamps would record deliveries that never
-    /// happened, and the first real notification after re-enabling would be
-    /// swallowed by a cooldown nobody benefited from.
-    private func dispatch(_ alerts: [HealthAlert], now: Date) -> [HealthAlert] {
+    /// shown. Otherwise its stamps would record deliveries that never happened,
+    /// and the first real notification after re-enabling would be held back by
+    /// a reminder interval nobody benefited from.
+    ///
+    /// - Parameter evaluated: The accounts this cycle derived alerts for, nil
+    ///   standing for the watch itself, so an account whose fetch failed does
+    ///   not count as having cleared.
+    private func dispatch(
+        _ alerts: [HealthAlert], evaluated: Set<AlgorandAddress?>, now: Date
+    ) -> [HealthAlert] {
         guard notificationsGate.isWanted else { return [] }
-        return dispatcher.dispatch(alerts, now: now)
+        return dispatcher.dispatch(alerts, evaluated: evaluated, now: now)
     }
 
     /// A failed cycle deliberately evaluates **no** participation alerts.
@@ -581,7 +591,9 @@ public actor ChainPoller {
             entries: config.addresses.map { AccountUpdate(address: $0, failure: failures[$0]) },
             roundTime: roundClock.estimate,
             alerts: alerts,
-            notifications: dispatch(alerts, now: now),
+            // No account was fetched, so only the watch itself was evaluated
+            // and none of the accounts' alerts has cleared.
+            notifications: dispatch(alerts, evaluated: [nil], now: now),
             // Every account failed, so the first one's reason stands for the
             // cycle. Repeating the same sentence per address would say nothing
             // more about a source that is simply unreachable.

@@ -662,6 +662,38 @@ struct ChainPollerTests {
         #expect(abs(update.roundTime - 3.0) < 0.2)
     }
 
+    /// The round-time estimate moves slightly from poll to poll, so a key
+    /// countdown near a threshold can read either side of it. Crossing three
+    /// days left must announce critical once, not on every rise.
+    @Test("keys crossing three days left notify critical once")
+    func keyExpiryCrossingNotifiesOnce() async throws {
+        let stub = StubFetcher()
+        let clock = TestClock()
+        let poller = makePoller(stub: stub, clock: clock)
+        let first: UInt64 = 64_030_100
+        // Rounds of exactly 2.8 s, polled every 30 s, with keys that run out
+        // 3 days and 4 hours after the first poll.
+        let lastValid = first + UInt64((3 * 86_400 + 4 * 3_600) / 2.8)
+        stub.route("/v2/ledger/supply", json: JSONBuilder.supply(round: first))
+        stub.route(
+            "/v2/blocks/", json: JSONBuilder.blockHeader(round: first, seed: nonMatchingSeed))
+
+        var notified = [AlertSeverity]()
+        for poll in 0..<(6 * 120) {
+            let round = first + UInt64(Double(poll) * 30 / 2.8)
+            stub.route(
+                "/v2/accounts/",
+                json: JSONBuilder.account(
+                    address: Self.addressString, round: round, lastProposed: round - 50,
+                    voteFirstValid: first, voteLastValid: lastValid))
+            let update = await poller.pollOnce()
+            notified += update.notifications.filter { $0.id == .keyExpiry }.map(\.severity)
+            clock.advance(30)
+        }
+
+        #expect(notified == [.warning, .critical])
+    }
+
     // MARK: - Streaming
 
     @Test("start publishes updates to the stream")

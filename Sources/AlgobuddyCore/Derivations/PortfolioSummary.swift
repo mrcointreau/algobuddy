@@ -10,9 +10,9 @@ import Foundation
 /// Pure over the entries of one cycle, so it can be derived wherever it is
 /// needed rather than carried and kept in step.
 public struct PortfolioSummary: Sendable, Equatable {
-    /// How many of the watched accounts are Online. Accounts whose fetch failed
-    /// count towards neither this nor `accountCount`, since nothing is known
-    /// about them this cycle.
+    /// How many of the watched accounts are Online, by their latest known
+    /// record. An account whose fetch failed counts by its stale entry; one
+    /// never fetched counts towards neither this nor `accountCount`.
     public var onlineAccounts = 0
     /// How many accounts contributed data at all.
     public var accountCount = 0

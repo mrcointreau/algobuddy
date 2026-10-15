@@ -87,10 +87,11 @@ public actor ChainPoller {
         /// `alertHistory` so escalation detection survives a relaunch too.
         public let alertSeverities: [AlertKey: AlertSeverity]
 
-        /// Whether any account was actually fetched. A cycle where none were
-        /// carries no figures at all, and its consumers keep the last update
-        /// that did on display.
-        public var hasData: Bool { entries.contains { $0.account != nil } }
+        /// Whether any account was actually fetched this cycle. A cycle where
+        /// none were carries no figures at all, and its consumers keep the last
+        /// update that did on display. A stale entry stands in for a failed
+        /// fetch and does not count.
+        public var hasData: Bool { entries.contains { $0.account != nil && !$0.isStale } }
 
         /// What the entries amount to together. Derived on demand, since it is
         /// a pure function of what is already here.
@@ -117,6 +118,24 @@ public actor ChainPoller {
         var isTruncated = false
     }
     private var rewards: [AlgorandAddress: AccountRewards] = [:]
+
+    /// Each account's last fetched entry, with the alerts evaluated for it
+    /// then. When a later fetch of that account fails while others answer,
+    /// these stand in, marked stale: a dropped request must not make a critical
+    /// account look healthy.
+    private struct LastGood {
+        let entry: AccountUpdate
+        let alerts: [HealthAlert]
+    }
+    private var lastGood: [AlgorandAddress: LastGood] = [:]
+
+    /// Consecutive failed fetches of one account, and since when, so an account
+    /// that keeps failing raises its own alert even while the others answer.
+    private struct AccountOutage {
+        var failures: Int
+        let since: Date
+    }
+    private var accountOutages: [AlgorandAddress: AccountOutage] = [:]
 
     private var supply: LedgerSupply?
     private var supplyFetchedAt: Date?
@@ -277,6 +296,15 @@ public actor ChainPoller {
                 failures[address] = PollFailure(stage: .account, message: describe(error))
             }
         }
+        for address in addresses {
+            if accounts[address] != nil {
+                accountOutages[address] = nil
+            } else {
+                let outage = accountOutages[address]
+                accountOutages[address] = AccountOutage(
+                    failures: (outage?.failures ?? 0) + 1, since: outage?.since ?? now)
+            }
+        }
 
         // A cycle fails only when not one account could be fetched. One
         // unreachable address degrades to that entry's own failure: the rest
@@ -424,23 +452,39 @@ public actor ChainPoller {
         failure: PollFailure?
     ) -> Update {
         var entries = [AccountUpdate]()
+        // Everything that holds, for display, and the part of it derived from
+        // fresh figures, which alone may notify.
         var alerts = [HealthAlert]()
+        var fresh = [HealthAlert]()
 
         for address in config.addresses {
             guard let account = accounts[address] else {
-                // Nothing was learned about this account, so nothing is derived
-                // for it and no rule is run against figures from an earlier
-                // round. Its own failure says why the entry is bare.
-                entries.append(AccountUpdate(address: address, failure: failures[address]))
+                // Nothing new was learned about this account, so no rule is run
+                // against figures from an earlier round. Its last good entry
+                // and the alerts evaluated with it stand in, marked stale, and
+                // stay off the dispatch: a reminder needs current figures.
+                let failure = failures[address]
+                if let held = lastGood[address] {
+                    entries.append(held.entry.stale(failure: failure))
+                    alerts.append(contentsOf: held.alerts)
+                } else {
+                    entries.append(AccountUpdate(address: address, failure: failure))
+                }
+                if let unavailable = unavailableAlert(for: address, now: now) {
+                    alerts.append(unavailable)
+                    fresh.append(unavailable)
+                }
                 continue
             }
             let entry = derive(
                 address: address, account: account, failure: failures[address], now: now)
+            let entryAlerts = engine.evaluate(snapshot(for: entry))
+            lastGood[address] = LastGood(entry: entry, alerts: entryAlerts)
             entries.append(entry)
-            alerts.append(contentsOf: engine.evaluate(snapshot(for: entry)))
+            alerts.append(contentsOf: entryAlerts)
+            fresh.append(contentsOf: entryAlerts)
         }
 
-        let sorted = ordered(alerts)
         // The watch itself counts as evaluated: an account answered, so the
         // source is reachable and its outage alert has cleared.
         let evaluated = Set(accounts.keys.map { Optional($0) } + [nil])
@@ -449,8 +493,8 @@ public actor ChainPoller {
             currentRound: round,
             entries: entries,
             roundTime: roundClock.estimate,
-            alerts: sorted,
-            notifications: dispatch(sorted, evaluated: evaluated, now: now),
+            alerts: ordered(alerts),
+            notifications: dispatch(ordered(fresh), evaluated: evaluated, now: now),
             // A shared stage that failed outranks an individual account's
             // failure: it is the one that reaches every entry.
             failure: failure ?? config.addresses.compactMap { failures[$0] }.first,
@@ -519,7 +563,28 @@ public actor ChainPoller {
                 KeyExpiry(participation: $0, currentRound: round)
             },
             rewards: rewardsSummary,
-            failure: failure)
+            failure: failure,
+            fetchedAt: now)
+    }
+
+    /// The alert for one account the source keeps failing to return while it
+    /// answers for others, on the same two conditions as the source's own
+    /// outage alert: enough attempts and enough time. A full outage raises
+    /// only that one instead, rather than repeating it once per account.
+    private func unavailableAlert(for address: AlgorandAddress, now: Date) -> HealthAlert? {
+        guard let outage = accountOutages[address],
+            outage.failures >= config.failuresBeforeAlert,
+            now.timeIntervalSince(outage.since) >= config.unreachableAfter
+        else { return nil }
+        let minutes = now.timeIntervalSince(outage.since) / 60
+        return HealthAlert(
+            id: .accountDataUnavailable,
+            address: address,
+            severity: .warning,
+            title: "Account data unavailable",
+            body:
+                "The chain data source has not returned this account for \(quantity(minutes, "minute")), although it answers for the others. Its figures and alerts may be out of date."
+        )
     }
 
     private func snapshot(for entry: AccountUpdate) -> Snapshot {

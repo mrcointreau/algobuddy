@@ -291,6 +291,30 @@ struct AlertDispatcherTests {
         #expect(cleared.dispatch([offline], evaluated: both, now: later).count == 1)
     }
 
+    /// An account whose fetch failed still gets its "data unavailable" alert
+    /// dispatched. That alert must not make the account count as evaluated, or
+    /// its other alerts would look cleared and be announced again on its return.
+    @Test("an alert for an unevaluated account clears none of its others")
+    func unevaluatedAlertClearsNothing() {
+        let first = ChainPollerTests.filledAddress(0x21)
+        let second = ChainPollerTests.filledAddress(0x22)
+        let both: Set<AlgorandAddress?> = [first, second, nil]
+        let offline = HealthAlert(
+            id: .accountOffline, address: second, severity: .critical, title: "t", body: "b")
+        let unavailable = HealthAlert(
+            id: .accountDataUnavailable, address: second, severity: .warning, title: "t",
+            body: "b")
+
+        var dispatcher = AlertDispatcher(cooldown: 900)
+        _ = dispatcher.dispatch([offline], evaluated: both, now: start)
+        let failing = dispatcher.dispatch(
+            [unavailable], evaluated: [first, nil], now: start.addingTimeInterval(200))
+        #expect(failing.map(\.id) == [.accountDataUnavailable])
+        #expect(
+            dispatcher.dispatch([offline], evaluated: both, now: start.addingTimeInterval(2_000))
+                .isEmpty)
+    }
+
     /// Relaunching, or rebuilding the poller after a Settings edit, must not
     /// announce afresh a condition the user was already told about.
     @Test("a restored notification counts as still holding")
@@ -310,6 +334,7 @@ struct AlertDispatcherTests {
             (.absenceHeadroom, .critical, 900),
             (.absenceHeadroom, .warning, 3_600),
             (.chainSourceUnreachable, .warning, 3_600),
+            (.accountDataUnavailable, .warning, 3_600),
             (.keyExpiry, .critical, 21_600),
             (.keyExpiry, .warning, 86_400),
             (.accountOffline, .critical, nil),

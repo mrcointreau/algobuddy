@@ -764,6 +764,9 @@ public actor ChainPoller {
                 "The chain data source returned an unexpected response. Check the URL points at algod."
         case .notHTTP:
             return "The chain data source did not return an HTTP response."
+        case .redirectRefused:
+            return
+                "The chain data source redirected elsewhere, and algobuddy only contacts the configured hosts. Check the URL."
         }
     }
 }

@@ -7,9 +7,9 @@ public protocol HTTPFetching: Sendable {
 }
 
 public struct URLSessionFetcher: HTTPFetching {
-    private let session: URLSession
+    let session: URLSession
 
-    public init(session: URLSession = .shared) { self.session = session }
+    public init(session: URLSession = URLSessionFetcher.privateSession) { self.session = session }
 
     public func get(
         _ url: URL, headers: [String: String], timeout: TimeInterval
@@ -18,7 +18,62 @@ public struct URLSessionFetcher: HTTPFetching {
         for (field, value) in headers { request.setValue(value, forHTTPHeaderField: field) }
         let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse else { throw AlgodError.notHTTP }
+        // A redirect the session refused arrives as the redirect response itself.
+        if Self.isRefusedRedirect(http) { throw AlgodError.redirectRefused }
         return (data, http.statusCode)
+    }
+
+    /// The session every client uses unless a test supplies its own.
+    ///
+    /// - No HTTP cache and no cookies: request URLs name the watched addresses,
+    ///   and nothing about them is worth keeping on disk.
+    /// - A deadline for the whole request, not only for each silence: a server
+    ///   that trickles a byte every few seconds would otherwise hold a poll open
+    ///   indefinitely, and every later poll with it.
+    /// - A redirect only within the host that was asked, and never from https
+    ///   down to http, so the configured hosts stay the only ones contacted.
+    /// - A plain user agent, which names the app and not the system.
+    public static let privateSession: URLSession = {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.urlCache = nil
+        configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
+        configuration.httpCookieStorage = nil
+        configuration.httpShouldSetCookies = false
+        configuration.timeoutIntervalForResource = 60
+        configuration.httpAdditionalHeaders = ["User-Agent": "algobuddy"]
+        return URLSession(
+            configuration: configuration, delegate: RedirectGuard(), delegateQueue: nil)
+    }()
+
+    /// Whether a response is a redirect that the session declined to follow.
+    static func isRefusedRedirect(_ response: HTTPURLResponse) -> Bool {
+        (300...399).contains(response.statusCode)
+            && response.value(forHTTPHeaderField: "Location") != nil
+    }
+}
+
+/// Which redirects the private session follows.
+enum RedirectPolicy {
+    /// Only to the host that was asked, and never from https down to http.
+    static func allows(from original: URL, to target: URL) -> Bool {
+        guard let from = original.host?.lowercased(), let to = target.host?.lowercased(),
+            from == to
+        else { return false }
+        return original.scheme?.lowercased() != "https" || target.scheme?.lowercased() == "https"
+    }
+}
+
+/// Applies `RedirectPolicy` for the private session, against the host of the
+/// request as first made, so a chain of redirects cannot walk away from it.
+final class RedirectGuard: NSObject, URLSessionTaskDelegate, Sendable {
+    func urlSession(
+        _ session: URLSession, task: URLSessionTask,
+        willPerformHTTPRedirection response: HTTPURLResponse, newRequest request: URLRequest
+    ) async -> URLRequest? {
+        guard let original = task.originalRequest?.url, let target = request.url,
+            RedirectPolicy.allows(from: original, to: target)
+        else { return nil }
+        return request
     }
 }
 
@@ -54,6 +109,9 @@ public enum AlgodError: Error, Equatable, Sendable {
     case notFound(path: String)
     case http(status: Int, path: String)
     case decoding(path: String, description: String)
+    /// The endpoint redirected to another host, or from https down to http,
+    /// which the private session does not follow.
+    case redirectRefused
 }
 
 /// Client for the three algod endpoints algobuddy reads.

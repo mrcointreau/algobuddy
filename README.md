@@ -52,7 +52,7 @@ If you ticked **Open at login**, untick it first: only the app itself can withdr
 
 ```bash
 make uninstall   # quits it and removes the app, keeping your settings
-make purge       # the same, and also forgets the address and settings
+make purge       # the same, and also forgets the addresses, settings and HTTP cache
 ```
 
 ## Configuration

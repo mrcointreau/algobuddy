@@ -37,13 +37,22 @@ public struct PortfolioSummary: Sendable, Equatable {
     /// Any account whose proposal history was cut short by the page budget
     /// makes the totals above a floor, so the caveat travels with them.
     public var isTruncated = false
+    /// Whether some account's proposals are missing from the totals above or
+    /// out of date in them: the indexer has not answered for it, its latest
+    /// query failed, or its own fetch failed and its figures are stale. False
+    /// whenever `hasRewards` is, since no total is shown then.
+    public var isPartial = false
 
     public init() {}
 
     public init(entries: [AccountUpdate], roundTime: TimeInterval) {
         self.init()
 
+        var someNotCurrent = false
         for entry in entries {
+            if entry.rewards == nil || entry.isStale || entry.failure?.stage == .rewards {
+                someNotCurrent = true
+            }
             if let account = entry.account {
                 accountCount += 1
                 totalStake = MicroAlgos(totalStake.raw &+ account.amount.raw)
@@ -68,6 +77,7 @@ public struct PortfolioSummary: Sendable, Equatable {
                 isTruncated = isTruncated || rewards.isTruncated
             }
         }
+        isPartial = hasRewards && someNotCurrent
     }
 
     private static func closest(_ current: TimeInterval?, _ candidate: TimeInterval) -> TimeInterval

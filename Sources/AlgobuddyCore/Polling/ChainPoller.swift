@@ -307,7 +307,7 @@ public actor ChainPoller {
             case .success(let account):
                 accounts[address] = account
             case .failure(let error):
-                failures[address] = PollFailure(stage: .account, message: describe(error))
+                failures[address] = pollFailure(error, at: .account)
             }
         }
         for address in addresses {
@@ -360,7 +360,7 @@ public actor ChainPoller {
             supply = fetched
             supplyFetchedAt = now
         case .failure(let error):
-            failure = failure ?? PollFailure(stage: .supply, message: describe(error))
+            failure = failure ?? pollFailure(error, at: .supply)
         case nil:
             break
         }
@@ -384,7 +384,7 @@ public actor ChainPoller {
                     )
             }
         case .failure(let error):
-            failure = failure ?? PollFailure(stage: .challengeSeed, message: describe(error))
+            failure = failure ?? pollFailure(error, at: .challengeSeed)
         case nil:
             break
         }
@@ -484,7 +484,7 @@ public actor ChainPoller {
                 state.fetchedAt = requestedAt
                 state.failure = nil
             case .failure(let error):
-                state.failure = PollFailure(stage: .rewards, message: describe(error))
+                state.failure = pollFailure(error, at: .rewards)
             }
             rewards[address] = state
         }
@@ -795,29 +795,45 @@ public actor ChainPoller {
         return now.timeIntervalSince(date)
     }
 
+    /// A failure at one stage, described for that stage.
+    private func pollFailure(_ error: any Error, at stage: PollFailure.Stage) -> PollFailure {
+        PollFailure(stage: stage, message: describe(error, at: stage))
+    }
+
     /// Plain language, for the panel to show as-is. The request that failed is
     /// identified by the failure's `stage` rather than by a raw path: a URL with
-    /// an address embedded in it is a log line, not something to read.
-    private func describe(_ error: any Error) -> String {
+    /// an address embedded in it is a log line, not something to read. The
+    /// stage also decides what a status can mean, since the same 404 says one
+    /// thing from the challenge block and another from the account.
+    private func describe(_ error: any Error, at stage: PollFailure.Stage) -> String {
+        // Only the rewards stage asks the indexer; every other stage asks algod.
+        let source = stage == .rewards ? "The indexer" : "The chain data source"
+        let check = stage == .rewards ? "Check the indexer URL." : "Check the URL points at algod."
         guard let algodError = error as? AlgodError else {
-            return "The chain data source could not be reached."
+            return "\(source) could not be reached."
         }
         switch algodError {
         case .unauthorized:
-            return "The chain data source requires a token. Public providers serve it without one."
+            return "\(source) requires a token. Public providers serve it without one."
+        case .notFound where stage == .challengeSeed:
+            // The accounts answered at or past this block's round, so the block
+            // exists, and the backend that took this request is behind, as one
+            // behind a load balancer can be.
+            return
+                "The chain data source does not have the challenge block yet, so challenge monitoring is paused until the next poll."
         case .notFound:
-            return
-                "The chain data source has no record of this address. Check the address and the network."
+            // algod answers for every well-formed address, one never funded
+            // included, so a missing record means a URL that misses its API.
+            return "\(source) has no such endpoint. \(check)"
         case .http(let status, _):
-            return "The chain data source returned an error (\(status))."
+            return "\(source) returned an error (\(status))."
         case .decoding:
-            return
-                "The chain data source returned an unexpected response. Check the URL points at algod."
+            return "\(source) returned an unexpected response. \(check)"
         case .notHTTP:
-            return "The chain data source did not return an HTTP response."
+            return "\(source) did not return an HTTP response."
         case .redirectRefused:
             return
-                "The chain data source redirected elsewhere, and algobuddy only contacts the configured hosts. Check the URL."
+                "\(source) redirected elsewhere, and algobuddy only contacts the configured hosts. Check the URL."
         }
     }
 }

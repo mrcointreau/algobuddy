@@ -204,6 +204,11 @@ final class AppModel {
     var menuBarSegments: [String] {
         guard let update = display else { return [] }
         let portfolio = update.portfolio
+        // Silent unless every account's proposals are current, so neither a
+        // pending fetch nor a failed one can pass for the total, least of all
+        // as "no blocks today". The panel still shows the figures, and says
+        // why they are partial.
+        let showsRewards = portfolio.hasRewards && !portfolio.isPartial
         return MenuBarMetric.allCases.filter(metrics.contains).compactMap { metric in
             switch metric {
             case .round:
@@ -214,11 +219,9 @@ final class AppModel {
             case .keyExpiry:
                 return portfolio.closestKeyExpiry.map(Format.duration)
             case .proposals24h:
-                // Silent until the indexer has answered for some account, so a
-                // pending fetch cannot read as "no blocks today".
-                return portfolio.hasRewards ? "\(portfolio.proposals24h) blk" : nil
+                return showsRewards ? "\(portfolio.proposals24h) blk" : nil
             case .earned24h:
-                guard portfolio.hasRewards else { return nil }
+                guard showsRewards else { return nil }
                 // Masked rather than dropped: removing the segment would
                 // shrink the item and shove every icon to its left along.
                 return valuesHidden

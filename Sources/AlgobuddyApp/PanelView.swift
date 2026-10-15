@@ -483,6 +483,15 @@ struct PortfolioCard: View {
                 if summary.isTruncated {
                     TruncationNote()
                 }
+                // An account's own failure is stated on its page, so the sums
+                // here would otherwise pass for the whole portfolio's.
+                if summary.isPartial {
+                    Text(
+                        "Some accounts' proposals are missing or out of date, so these totals are incomplete."
+                    )
+                    .font(Typography.secondary).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                }
             }
         }
     }

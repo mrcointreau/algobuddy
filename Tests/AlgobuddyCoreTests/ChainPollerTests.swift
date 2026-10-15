@@ -356,15 +356,49 @@ struct ChainPollerTests {
         #expect(update.only?.absence == fresh)
     }
 
-    @Test("a mistyped address reports not-found rather than a generic error")
-    func notFound() async throws {
+    /// algod answers for every well-formed address, one never funded included,
+    /// so a 404 for an account means a URL that misses its API. The panel shows
+    /// this string verbatim, so it has to point at what can be fixed rather
+    /// than at the address or a bare status code the reader cannot act on.
+    @Test("an account 404 points at the URL rather than the address")
+    func accountNotFoundPointsAtTheURL() async throws {
         let stub = StubFetcher()
         let clock = TestClock()
         stub.route("/v2/accounts/", status: 404, json: "{}")
         let update = await makePoller(stub: stub, clock: clock).pollOnce()
-        // The panel shows this string verbatim, so a 404 has to point at the
-        // address rather than report a bare status code the reader cannot act on.
-        #expect(update.failure?.message.contains("address") == true)
+        let message = try #require(update.failure?.message)
+        #expect(message.contains("points at algod"))
+        #expect(!message.contains("address"))
+    }
+
+    /// A backend behind a load balancer can trail the one that answered the
+    /// accounts, so the challenge block can be missing for a cycle. Neither the
+    /// address nor the URL is at fault, and every page shows this line.
+    @Test("a missing challenge block reads as a lagging source")
+    func challengeBlockNotFound() async throws {
+        let stub = StubFetcher()
+        let clock = TestClock()
+        standardRoutes(stub, seed: nonMatchingSeed)
+        stub.route("/v2/blocks/", status: 404, json: "{}")
+        let update = await makePoller(stub: stub, clock: clock).pollOnce()
+        #expect(update.failure?.stage == .challengeSeed)
+        let message = try #require(update.failure?.message)
+        #expect(message.contains("challenge block"))
+        #expect(!message.contains("address"))
+    }
+
+    @Test("a rewards failure names the indexer")
+    func rewardsFailureNamesTheIndexer() async throws {
+        let stub = StubFetcher()
+        let clock = TestClock()
+        standardRoutes(stub, seed: nonMatchingSeed)
+        stub.route("/v2/block-headers", json: "{\"unexpected\":true}")
+        let update = await pollAfterRewards(
+            makePoller(stub: stub, clock: clock, withIndexer: true), clock: clock)
+        let failure = try #require(update.only?.failure)
+        #expect(failure.stage == .rewards)
+        #expect(failure.message.hasPrefix("The indexer"))
+        #expect(!failure.message.contains("algod"))
     }
 
     /// The private session refuses a redirect to another host. The panel must

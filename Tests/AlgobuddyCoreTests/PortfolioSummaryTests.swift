@@ -202,4 +202,51 @@ struct PortfolioSummaryTests {
         #expect(summary.isTruncated)
         #expect(summary.proposals7d == 4)
     }
+
+    /// The sums pass for the whole portfolio's unless they say otherwise, so an
+    /// account whose proposals are missing or not current has to mark them.
+    @Test("totals that leave out an account or hold its stale figures are partial")
+    func partialTotals() {
+        let current = AccountUpdate(
+            address: address(1), account: account(address(1), amount: 1),
+            rewards: rewards(proposals24h: 2))
+        func summary(with other: AccountUpdate) -> PortfolioSummary {
+            PortfolioSummary(entries: [current, other], roundTime: roundTime)
+        }
+        let second = account(address(2), amount: 1)
+
+        #expect(
+            !summary(
+                with: AccountUpdate(
+                    address: address(2), account: second, rewards: rewards(proposals24h: 1))
+            ).isPartial)
+        // The indexer has not answered for it.
+        #expect(summary(with: AccountUpdate(address: address(2), account: second)).isPartial)
+        // Its latest query failed, so its figures are older ones.
+        #expect(
+            summary(
+                with: AccountUpdate(
+                    address: address(2), account: second, rewards: rewards(proposals24h: 1),
+                    failure: PollFailure(stage: .rewards, message: ""))
+            ).isPartial)
+        // Its own fetch failed, so its figures are carried from an earlier cycle.
+        #expect(
+            summary(
+                with: AccountUpdate(
+                    address: address(2), account: second, rewards: rewards(proposals24h: 1),
+                    isStale: true)
+            ).isPartial)
+        // It was never fetched at all.
+        #expect(summary(with: AccountUpdate(address: address(2))).isPartial)
+    }
+
+    /// With no proposal history anywhere no total is shown, so none is partial.
+    @Test("no proposal history at all is not partial")
+    func noHistoryIsNotPartial() {
+        let entries = [
+            AccountUpdate(address: address(1), account: account(address(1), amount: 1)),
+            AccountUpdate(address: address(2)),
+        ]
+        #expect(!PortfolioSummary(entries: entries, roundTime: roundTime).isPartial)
+    }
 }

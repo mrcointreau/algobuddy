@@ -49,7 +49,9 @@ struct PanelView: View {
                 Divider()
                 single(update, entry)
             } else if let entry = selectedEntry(in: update) {
-                header {
+                // A stale entry is older than the cycle around it, and its own
+                // page states its own age.
+                header(observedAt: entry.isStale ? entry.fetchedAt : nil) {
                     backControl
                     AddressTitle(address: entry.address.stringValue)
                 }
@@ -104,10 +106,11 @@ struct PanelView: View {
             if !alerts.isEmpty {
                 AlertsCard(alerts: alerts, namesAccounts: false)
             }
-            // Only a stage every account depends on. Another account's failure
-            // is not this page's to state, and this account's own is stated by
-            // its section above.
-            if let failure = model.sharedFailure, failure.stage.isShared {
+            // A stage every account depends on, or a failure every account has,
+            // as in a full outage, when this page shows the last good figures.
+            // Another account's own failure is not this page's to state, and
+            // one the section above already states is not said twice.
+            if let failure = model.sharedFailure, failure != entry.failure {
                 FailureLine(failure: failure)
             }
         }
@@ -194,6 +197,7 @@ struct PanelView: View {
     /// Identity and freshness only. The account's status belongs to the card
     /// below, stated once rather than repeated here as a second indicator.
     private func header<Identity: View>(
+        observedAt: Date? = nil,
         @ViewBuilder identity: () -> Identity
     ) -> some View {
         HStack(spacing: 8) {
@@ -204,7 +208,7 @@ struct PanelView: View {
             // exactly the number you must not get wrong on a staleness readout.
             // The age of the *data* on display, not of the last poll attempt: a
             // failed attempt seconds ago must not dress stale figures as fresh.
-            if let observed = model.display?.observedAt {
+            if let observed = observedAt ?? model.display?.observedAt {
                 TimelineView(.periodic(from: .now, by: 10)) { context in
                     let age = context.date.timeIntervalSince(observed)
                     Text(Format.relative(age))
@@ -859,7 +863,21 @@ struct AccountRow: View {
                 text + Text(" · ").foregroundColor(.secondary)
                 + Text(keysText).foregroundColor(keysLevel.textTint ?? .secondary)
         }
+        if let staleText {
+            text =
+                text + Text(" · ").foregroundColor(.secondary)
+                + Text(staleText).foregroundColor(.orange)
+        }
         return text
+    }
+
+    /// How old a stale entry's figures are, so a row carried over from an
+    /// earlier poll never reads as current. Measured against now rather than
+    /// the displayed cycle, which during a full outage is itself old. The panel
+    /// redraws with every poll, which keeps the figure close enough.
+    private var staleText: String? {
+        guard entry.isStale, let fetchedAt = entry.fetchedAt else { return nil }
+        return "as of \(Format.relative(Date().timeIntervalSince(fetchedAt)))"
     }
 
     private var keysText: String? {
@@ -879,6 +897,7 @@ struct AccountRow: View {
         if let account = entry.account {
             parts.append(account.statusText)
             if let keysText { parts.append(keysText) }
+            if let staleText { parts.append(staleText) }
         } else {
             parts.append(entry.failure?.message ?? "No data")
         }

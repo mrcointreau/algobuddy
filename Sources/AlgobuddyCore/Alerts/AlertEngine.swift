@@ -12,6 +12,9 @@ public enum AlertID: String, Sendable, CaseIterable, Codable {
     /// The configured chain data source. algobuddy holds no separate connection to the user's
     /// own node, so there is no "node unreachable" counterpart.
     case chainSourceUnreachable
+    /// One watched account the source keeps failing to return while it answers
+    /// for the others, so that account's figures and alerts are not current.
+    case accountDataUnavailable
     case accountOffline
     case challengeFailing
     case absenceHeadroom

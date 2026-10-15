@@ -910,6 +910,151 @@ struct ChainPollerTests {
         #expect(await poller.nextDelay == 5)  // now the shared backoff engages
     }
 
+    /// One dropped request for one account must not make it look healthy. Its
+    /// last good figures and alerts stand in, marked stale, until it answers.
+    @Test("a failed account keeps its last entry and alerts, marked stale")
+    func failedAccountStaysVisible() async throws {
+        let stub = StubFetcher()
+        let clock = TestClock()
+        let second = Self.filledAddress(0x11)
+        accountRoute(stub, address)
+        accountRoute(stub, second, status: "Offline")
+        sharedRoutes(stub)
+        let poller = makePoller(stub: stub, clock: clock, addresses: [address, second])
+        let firstFetch = clock.now
+        _ = await poller.pollOnce()
+
+        stub.route("/v2/accounts/\(second.stringValue)", status: 503, json: "{}")
+        clock.advance(30)
+        let update = await poller.pollOnce()
+
+        let held = try #require(update.entry(for: second))
+        #expect(held.isStale)
+        #expect(held.account?.status == .offline)
+        #expect(held.fetchedAt == firstFetch)
+        #expect(held.failure?.stage == .account)
+        #expect(update.alerts.contains { $0.id == .accountOffline && $0.address == second })
+        #expect(update.entry(for: address)?.isStale == false)
+        #expect(update.hasData)
+        #expect(update.portfolio.accountCount == 2)
+    }
+
+    /// A reminder restates a condition as current, so it waits for figures that
+    /// are. While an account's fetch fails, its held alerts stay quiet, and the
+    /// first fresh evaluation after it answers again carries the reminder.
+    @Test("stale alerts send no reminder until the account answers again")
+    func staleAlertsDoNotRemind() async throws {
+        let stub = StubFetcher()
+        let clock = TestClock()
+        let second = Self.filledAddress(0x11)
+        accountRoute(stub, address)
+        // Keys that expire in under two days: critical, and reminded every six
+        // hours while that holds.
+        let expiring = JSONBuilder.account(
+            address: second.stringValue, round: 64_030_100, lastProposed: 64_030_050,
+            voteFirstValid: 63_308_451, voteLastValid: 64_090_000)
+        stub.route("/v2/accounts/\(second.stringValue)", json: expiring)
+        sharedRoutes(stub)
+        let poller = makePoller(stub: stub, clock: clock, addresses: [address, second])
+
+        func keyNotifications(_ update: ChainPoller.Update) -> Int {
+            update.notifications.filter { $0.id == .keyExpiry && $0.address == second }.count
+        }
+        #expect(keyNotifications(await poller.pollOnce()) == 1)
+
+        stub.route("/v2/accounts/\(second.stringValue)", status: 503, json: "{}")
+        for _ in 0..<8 {
+            clock.advance(3_600)
+            #expect(keyNotifications(await poller.pollOnce()) == 0)
+        }
+
+        stub.route("/v2/accounts/\(second.stringValue)", json: expiring)
+        clock.advance(30)
+        #expect(keyNotifications(await poller.pollOnce()) == 1)
+    }
+
+    /// A blip must stay quiet, and an account that keeps failing while the
+    /// others answer must not go unwatched under a healthy icon.
+    @Test("an account that keeps failing raises its own alert")
+    func failingAccountAlerts() async throws {
+        let stub = StubFetcher()
+        let clock = TestClock()
+        let second = Self.filledAddress(0x11)
+        accountRoute(stub, address)
+        stub.route("/v2/accounts/\(second.stringValue)", status: 503, json: "{}")
+        sharedRoutes(stub)
+        let poller = makePoller(stub: stub, clock: clock, addresses: [address, second])
+
+        func unavailable(_ update: ChainPoller.Update) -> HealthAlert? {
+            update.alerts.first { $0.id == .accountDataUnavailable }
+        }
+        // Three failures inside two minutes stay quiet.
+        #expect(unavailable(await poller.pollOnce()) == nil)
+        clock.advance(30)
+        #expect(unavailable(await poller.pollOnce()) == nil)
+        clock.advance(30)
+        #expect(unavailable(await poller.pollOnce()) == nil)
+
+        clock.advance(65)
+        let raised = await poller.pollOnce()
+        let alert = try #require(unavailable(raised))
+        #expect(alert.address == second)
+        #expect(alert.severity == .warning)
+        #expect(raised.notifications.contains { $0.id == .accountDataUnavailable })
+        #expect(await poller.nextDelay == 30)
+
+        accountRoute(stub, second)
+        clock.advance(30)
+        #expect(unavailable(await poller.pollOnce()) == nil)
+
+        // A new failure starts its own count rather than inheriting the old one.
+        stub.route("/v2/accounts/\(second.stringValue)", status: 503, json: "{}")
+        clock.advance(30)
+        #expect(unavailable(await poller.pollOnce()) == nil)
+    }
+
+    /// A stale entry stands in for a failed fetch. A cycle made only of those
+    /// learned nothing, and its consumers must keep the last real data.
+    @Test("a stale entry does not count as fetched data")
+    func staleEntryIsNotData() {
+        let held = AccountUpdate(
+            address: address,
+            account: try? JSONDecoder().decode(
+                AccountState.self, from: Data(JSONBuilder.account(round: 64_030_100).utf8)),
+            fetchedAt: TestClock().now, isStale: true)
+        let update = ChainPoller.Update(
+            observedAt: TestClock().now, currentRound: nil, entries: [held], roundTime: 2.8,
+            alerts: [], notifications: [], failure: nil, alertHistory: [:],
+            alertSeverities: [:])
+        #expect(held.account != nil)
+        #expect(!update.hasData)
+    }
+
+    /// An unreachable source fails every account at once. One alert says so;
+    /// repeating it per account would add nothing. An account still failing
+    /// once the source answers again has served its time and alerts at once.
+    @Test("a full outage raises the source alert, not one per account")
+    func fullOutageRaisesOneAlert() async throws {
+        let stub = StubFetcher()
+        let clock = TestClock()
+        let second = Self.filledAddress(0x11)
+        stub.setFailing(true)
+        let poller = makePoller(stub: stub, clock: clock, addresses: [address, second])
+
+        _ = await poller.pollOnce()
+        clock.advance(65)
+        _ = await poller.pollOnce()
+        clock.advance(65)
+        #expect(await poller.pollOnce().alerts.map(\.id) == [.chainSourceUnreachable])
+
+        stub.setFailing(false)
+        accountRoute(stub, address)
+        stub.route("/v2/accounts/\(second.stringValue)", status: 503, json: "{}")
+        sharedRoutes(stub)
+        clock.advance(30)
+        #expect(await poller.pollOnce().alerts.map(\.id) == [.accountDataUnavailable])
+    }
+
     /// A surface that states one address's trouble for the whole portfolio
     /// would blame every account for one of them, so the failure has to say
     /// which kind it is.

@@ -67,7 +67,8 @@ public struct AlertDispatcher: Sendable, Equatable {
     public func reminderInterval(for alert: HealthAlert) -> TimeInterval? {
         switch (alert.id, alert.severity) {
         case (.challengeFailing, _), (.absenceHeadroom, .critical): cooldown
-        case (.absenceHeadroom, _), (.chainSourceUnreachable, _): 3_600
+        case (.absenceHeadroom, _), (.chainSourceUnreachable, _), (.accountDataUnavailable, _):
+            3_600
         case (.keyExpiry, .critical): 6 * 3_600
         case (.keyExpiry, _): 86_400
         case (.accountOffline, _), (.notEarning, _), (.balanceOutOfRange, _): nil
@@ -82,8 +83,10 @@ public struct AlertDispatcher: Sendable, Equatable {
     ///
     /// - Parameter evaluated: The accounts whose alerts this call describes, nil
     ///   standing for the watch itself. An alert of an account that was not
-    ///   evaluated, because its fetch failed, has not cleared. Nil means every
-    ///   account was evaluated.
+    ///   evaluated, because its fetch failed, has not cleared. An alert for such
+    ///   an account, such as one saying its data is unavailable, is dispatched
+    ///   like any other but clears nothing. Nil means every account was
+    ///   evaluated.
     public mutating func dispatch(
         _ alerts: [HealthAlert], evaluated: Set<AlgorandAddress?>? = nil, now: Date
     ) -> [HealthAlert] {
@@ -131,9 +134,8 @@ public struct AlertDispatcher: Sendable, Equatable {
         // whatever held before still holds.
         let covered: (AlertKey) -> Bool
         if let evaluated {
-            let addresses = evaluated.union(alerts.map(\.address))
-            covered = { addresses.contains($0.address) }
-            everEvaluated.formUnion(addresses)
+            covered = { evaluated.contains($0.address) }
+            everEvaluated.formUnion(evaluated)
         } else {
             covered = { _ in true }
             evaluatedEverything = true

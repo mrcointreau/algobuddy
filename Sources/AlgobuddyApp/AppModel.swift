@@ -181,6 +181,10 @@ final class AppModel {
     /// carries over exactly once and the address does not outlive the list.
     private let singleAddressKey = "address"
     private let accountNamesKey = "accountNames"
+    private let menuBarShapesKey = "menuBarShapes"
+    /// The shape of the last figure each menu bar metric showed. See
+    /// `menuBarStandIn(_:)`.
+    private var menuBarShapes: [MenuBarMetric: String] = [:]
 
     // MARK: - Derived state
 
@@ -216,33 +220,17 @@ final class AppModel {
     /// shared by the cycle, the two countdowns show whichever account runs out
     /// first, and the proposal figures are sums. With one account watched every
     /// one of those is that account's own value.
+    ///
+    /// Every selected metric always takes its place, as its figure or, while it
+    /// has none, as a stand-in of about the same width. The panel hangs from
+    /// this item, and an item that changes width under an open panel moves
+    /// along the menu bar, which has the system place the panel again, at times
+    /// against the item's other edge. So the item keeps its width from launch,
+    /// onboarding included, to the first figures, give or take the few points
+    /// by which the menu bar's digits differ from one another.
     var menuBarSegments: [String] {
-        guard let update = display else { return [] }
-        let portfolio = update.portfolio
-        // Silent unless every account's proposals are current, so neither a
-        // pending fetch nor a failed one can pass for the total, least of all
-        // as "no blocks today". The panel still shows the figures, and says
-        // why they are partial.
-        let showsRewards = portfolio.hasRewards && !portfolio.isPartial
-        return MenuBarMetric.allCases.filter(metrics.contains).compactMap { metric in
-            switch metric {
-            case .round:
-                // "#" marks it as an index rather than a quantity.
-                return update.currentRound.map { "#" + Format.round($0) }
-            case .absenceHeadroom:
-                return portfolio.closestAbsenceHeadroom.map(Format.duration)
-            case .keyExpiry:
-                return portfolio.closestKeyExpiry.map(Format.duration)
-            case .proposals24h:
-                return showsRewards ? "\(portfolio.proposals24h) blk" : nil
-            case .earned24h:
-                guard showsRewards else { return nil }
-                // Masked rather than dropped: removing the segment would
-                // shrink the item and shove every icon to its left along.
-                return valuesHidden
-                    ? "\(Format.hidden(4)) \(MenuBar.algo)"
-                    : "\(Format.algos(portfolio.earned24h, decimals: 1)) \(MenuBar.algo)"
-            }
+        MenuBarMetric.allCases.filter(metrics.contains).map { metric in
+            menuBarFigure(metric) ?? menuBarStandIn(metric)
         }
     }
 
@@ -251,25 +239,78 @@ final class AppModel {
         return segments.isEmpty ? nil : segments.joined(separator: MenuBar.separator)
     }
 
-    /// A representative sample of the current selection, for the width readout
-    /// in Settings. Uses live values when there are any, and plausible
-    /// placeholders when the app has not polled yet.
-    var menuBarWidthSample: String {
-        let segments =
-            menuBarSegments.isEmpty
-            ? MenuBarMetric.allCases.filter(metrics.contains).map(Self.placeholder)
-            : menuBarSegments
-        return segments.joined(separator: MenuBar.separator)
+    /// The menu bar text as it stands, figures or stand-ins, for the width
+    /// readout in Settings.
+    var menuBarWidthSample: String { menuBarSegments.joined(separator: MenuBar.separator) }
+
+    /// A metric's figure from the data on display, or nil while it has none.
+    private func menuBarFigure(_ metric: MenuBarMetric) -> String? {
+        guard let update = display else { return nil }
+        let portfolio = update.portfolio
+        // Silent unless every account's proposals are current, so neither a
+        // pending fetch nor a failed one can pass for the total, least of all
+        // as "no blocks today". The panel still shows the figures, and says
+        // why they are partial.
+        let showsRewards = portfolio.hasRewards && !portfolio.isPartial
+        switch metric {
+        case .round:
+            // "#" marks it as an index rather than a quantity.
+            return update.currentRound.map { "#" + Format.round($0) }
+        case .absenceHeadroom:
+            return portfolio.closestAbsenceHeadroom.map(Format.duration)
+        case .keyExpiry:
+            return portfolio.closestKeyExpiry.map(Format.duration)
+        case .proposals24h:
+            return showsRewards ? "\(portfolio.proposals24h) blk" : nil
+        case .earned24h:
+            guard showsRewards else { return nil }
+            return valuesHidden
+                ? Self.maskedEarned
+                : "\(Format.algos(portfolio.earned24h, decimals: 1)) \(MenuBar.algo)"
+        }
     }
 
-    private static func placeholder(_ metric: MenuBarMetric) -> String {
+    /// What a metric shows while it has no figure: the shape of the last figure
+    /// it showed, remembered across launches, so the stand-in has as many digits
+    /// as the figure it waits for. Before any, the shape of a typical one.
+    private func menuBarStandIn(_ metric: MenuBarMetric) -> String {
+        // The mask hides any figure, so it stands in for one as well.
+        if metric == .earned24h, valuesHidden { return Self.maskedEarned }
+        return menuBarShapes[metric] ?? FigureShape.of(Self.typicalFigure(metric)) ?? ""
+    }
+
+    /// Masked rather than dropped: removing the segment would shrink the item
+    /// and shove every icon to its left along.
+    private static let maskedEarned = "\(Format.hidden(4)) \(MenuBar.algo)"
+
+    /// A figure of the usual width for each metric, whose shape stands in for
+    /// it before the first figure.
+    private static func typicalFigure(_ metric: MenuBarMetric) -> String {
         switch metric {
-        case .round: "#64.06M"
+        case .round: "#66.04M"
         case .absenceHeadroom: "9.8d"
-        case .keyExpiry: "277.6d"
-        case .proposals24h: "13 blk"
-        case .earned24h: "109.6 \(MenuBar.algo)"
+        case .keyExpiry: "87.1d"
+        case .proposals24h: "3 blk"
+        case .earned24h: "8.2 \(MenuBar.algo)"
         }
+    }
+
+    /// Remembers the shape of each figure the menu bar shows, for its stand-in
+    /// after a relaunch. Written only when one changes, as when a figure gains
+    /// a digit, and never the figure itself.
+    private func rememberMenuBarShapes() {
+        var changed = false
+        for metric in MenuBarMetric.allCases where metrics.contains(metric) {
+            guard let figure = menuBarFigure(metric), let shape = FigureShape.of(figure),
+                menuBarShapes[metric] != shape
+            else { continue }
+            menuBarShapes[metric] = shape
+            changed = true
+        }
+        guard changed else { return }
+        UserDefaults.standard.set(
+            Dictionary(uniqueKeysWithValues: menuBarShapes.map { ($0.key.rawValue, $0.value) }),
+            forKey: menuBarShapesKey)
     }
 
     // MARK: - Launch at login
@@ -441,6 +482,15 @@ final class AppModel {
         }
         notificationsEnabled = defaults.object(forKey: "notifications") as? Bool ?? true
         valuesHidden = defaults.bool(forKey: "valuesHidden")
+        // Only what can stand in for a figure, since it goes into the menu bar
+        // as it is.
+        let shapes = defaults.dictionary(forKey: menuBarShapesKey) as? [String: String] ?? [:]
+        menuBarShapes = Dictionary(
+            uniqueKeysWithValues: shapes.compactMap { key, shape in
+                guard let metric = MenuBarMetric(rawValue: key), FigureShape.isShape(shape)
+                else { return nil }
+                return (metric, shape)
+            })
         log.info(
             "load: bundle=\(Bundle.main.bundleIdentifier ?? "nil") addresses=\(stored.count)"
         )
@@ -684,6 +734,7 @@ final class AppModel {
         let isPoll = value.observedAt != update?.observedAt
         update = value
         if value.hasData { lastData = value }
+        rememberMenuBarShapes()
         saveAlertHistory(value.alertHistory, severities: value.alertSeverities)
         if !isPoll {
             if let failure = value.entries.compactMap(\.failure).first(where: {

@@ -68,7 +68,11 @@ jobs:
       actions: read
 
     steps:
-      - uses: actions/checkout@v4
+      # v5, the first major on Node.js 24. From v6 checkout keeps its token in
+      # a file of its own, while claude-code-action removes the token from the
+      # repository's git config before the agent runs, so a later major needs
+      # that checked first.
+      - uses: actions/checkout@v5
 
       - uses: anthropics/claude-code-action@v1
         with:

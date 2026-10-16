@@ -22,11 +22,14 @@ jobs:
     steps:
       - name: Mint bot token
         id: bot
-        uses: actions/create-github-app-token@v1
+        uses: actions/create-github-app-token@v3
         with:
-          app-id: ${{ secrets.BOT_ID }}
+          # The app's Client ID, which the action asks for in place of the App
+          # ID. A repository variable rather than a secret: it identifies the
+          # app and grants nothing, where the private key does.
+          client-id: ${{ vars.BOT_CLIENT_ID }}
           private-key: ${{ secrets.BOT_SK }}
 
-      - uses: googleapis/release-please-action@v4
+      - uses: googleapis/release-please-action@v5
         with:
           token: ${{ steps.bot.outputs.token }}

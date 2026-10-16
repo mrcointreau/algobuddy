@@ -30,6 +30,7 @@ struct PanelView: View {
         // instead of floating in the middle of its window.
         .frame(maxHeight: .infinity, alignment: .top)
         .environment(\.valuesHidden, model.valuesHidden)
+        .environment(\.accountNames, model.accountNames)
         .background(
             PanelWindowKeeper(contentHeight: contentHeight, animates: !reduceMotion) {
                 model.selectedAccount = nil
@@ -688,12 +689,13 @@ struct AlertsCard: View {
     let alerts: [HealthAlert]
     /// Whether an entry names the account it holds for. Only past one watched
     /// account: with a single one there is nothing to tell apart, and the
-    /// address would be a label on the only thing it could be about.
+    /// label would name the only thing it could be about.
     let namesAccounts: Bool
     /// Opens the account an entry holds for. When set, each entry about an
     /// account becomes a row that leads to it, the way the list's rows do.
     var open: ((AlgorandAddress) -> Void)?
     @Environment(\.valuesHidden) private var isHidden
+    @Environment(\.accountNames) private var names
 
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.heading) {
@@ -747,12 +749,9 @@ struct AlertsCard: View {
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
                     Text(alert.title).font(Typography.primary.weight(.medium))
                     if namesAccounts, let address = alert.address {
-                        Text(
-                            Format.addressLabel(
-                                address.stringValue, hidden: isHidden)
-                        )
-                        .font(Typography.secondary)
-                        .foregroundStyle(.secondary)
+                        Text(Format.accountLabel(address, names: names, hidden: isHidden))
+                            .font(Typography.secondary)
+                            .foregroundStyle(.secondary)
                     }
                     if leadsToAccount {
                         Spacer(minLength: 0)
@@ -818,6 +817,7 @@ struct AccountRow: View {
     let alerts: [HealthAlert]
     let open: () -> Void
     @Environment(\.valuesHidden) private var isHidden
+    @Environment(\.accountNames) private var names
 
     var body: some View {
         Button(action: open) {
@@ -828,8 +828,7 @@ struct AccountRow: View {
                     .frame(width: 14)
 
                 VStack(alignment: .leading, spacing: 1) {
-                    Text(Format.addressLabel(entry.address.stringValue, hidden: isHidden))
-                        .font(Typography.primary.weight(.medium))
+                    title
                     facts.font(Typography.secondary)
                 }
 
@@ -857,6 +856,17 @@ struct AccountRow: View {
 
     private var health: HealthLevel {
         HealthLevel(worstOf: alerts.map(\.severity), hasData: entry.account != nil)
+    }
+
+    /// The name followed by the short address, or the short address alone.
+    @ViewBuilder
+    private var title: some View {
+        let address = Format.addressLabel(entry.address.stringValue, hidden: isHidden)
+        if let name = names.name(for: entry.address) {
+            NamedAddress(name: name, address: address, font: Typography.primary.weight(.medium))
+        } else {
+            Text(address).font(Typography.primary.weight(.medium))
+        }
     }
 
     /// The status, then the key countdown, coloured fact by fact.
@@ -902,7 +912,7 @@ struct AccountRow: View {
     }
 
     private var spoken: String {
-        var parts = [Format.addressLabel(entry.address.stringValue, hidden: isHidden)]
+        var parts = [Format.accountLabel(entry.address, names: names, hidden: isHidden)]
         if let account = entry.account {
             parts.append(account.statusText)
             if let keysText { parts.append(keysText) }
@@ -917,18 +927,20 @@ struct AccountRow: View {
     }
 }
 
-/// An account's short address as a title, with the full address one right
-/// click away.
+/// An account's name followed by its short address, or the short address
+/// alone without a name, as a title, with the full address one right click
+/// away.
 struct AddressTitle: View {
     let address: String
     @Environment(\.valuesHidden) private var isHidden
+    @Environment(\.accountNames) private var names
 
     var body: some View {
-        Text(Format.addressLabel(address, hidden: isHidden))
-            .font(Typography.primary)
+        title
             .textSelection(.enabled)
-            // Selecting the text only yields the abbreviated form, which no
-            // explorer accepts, so the menu offers the full address.
+            // Selecting the text yields only the name or the abbreviated form,
+            // neither of which an explorer accepts, so the menu offers the full
+            // address.
             // Deliberately available while values are hidden: the mask guards
             // against onlookers, and the clipboard is not on screen.
             .contextMenu {
@@ -938,6 +950,45 @@ struct AddressTitle: View {
                     pasteboard.setString(address, forType: .string)
                 }
             }
+    }
+
+    /// One line whatever the name, since the header keeps one height on every
+    /// page. Before anything is applied, the header shows the row being typed,
+    /// which may name no account yet and so has no name.
+    @ViewBuilder
+    private var title: some View {
+        let short = Format.addressLabel(address, hidden: isHidden)
+        if let account = try? AlgorandAddress(address), let name = names.name(for: account) {
+            NamedAddress(name: name, address: short, font: Typography.primary)
+        } else {
+            Text(short).font(Typography.primary).lineLimit(1)
+        }
+    }
+}
+
+/// A name followed by the short address, as an Attention entry follows its
+/// title with one.
+///
+/// Beside the rest of a row or a header there is room for only a short name,
+/// so a longer one stands alone on the line, cut short, rather than wrap and
+/// split the address over two lines.
+struct NamedAddress: View {
+    let name: String
+    let address: String
+    let font: Font
+
+    var body: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Text(name).font(font)
+                Text(address).font(Typography.secondary).foregroundStyle(.secondary)
+            }
+            Text(name).font(font).lineLimit(1)
+                // HIG: an expansion tooltip shows the full version of cut
+                // text. It gives back the address, and any of the name the
+                // line has no room for.
+                .help("\(name) · \(address)")
+        }
     }
 }
 

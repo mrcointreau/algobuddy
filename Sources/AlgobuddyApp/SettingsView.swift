@@ -411,6 +411,9 @@ struct AddressList: View {
     /// Focus is owned here rather than by each row, so that a newly added row
     /// can be typed into straight away and so that leaving any row commits it.
     @FocusState private var focused: AddressDraft.ID?
+    /// The name fields' focus, kept apart from the address fields' because
+    /// `AddressField` also serves onboarding, which asks for no name.
+    @FocusState private var focusedName: AddressDraft.ID?
 
     /// The rows that name an account an earlier row already names. Compared as
     /// addresses rather than as text, so a repeat pasted in another case is
@@ -431,11 +434,35 @@ struct AddressList: View {
 
         VStack(alignment: .leading, spacing: Spacing.row) {
             ForEach($model.addressDrafts) { $draft in
+                // A rule between accounts, as between the rows of a grouped
+                // form, keeps each name with its own address, since an account
+                // takes two lines.
+                if draft.id != model.addressDrafts.first?.id {
+                    Divider()
+                }
                 HStack(spacing: 6) {
-                    AddressField(
-                        draft: $draft, focus: $focused, isMasked: model.valuesHidden,
-                        isRepeat: repeats.contains(draft.id)
-                    ) { model.apply() }
+                    VStack(alignment: .leading, spacing: 4) {
+                        AddressField(
+                            draft: $draft, focus: $focused, isMasked: model.valuesHidden,
+                            isRepeat: repeats.contains(draft.id)
+                        ) { model.apply() }
+
+                        // Never masked: a name is the user's own label, and
+                        // what tells the accounts apart while values are hidden.
+                        // The prompt marks the field while it is empty, since a
+                        // grouped form draws a text field without a border.
+                        TextField("Name", text: $draft.name, prompt: Text("Optional"))
+                            .font(Typography.primary)
+                            .focused($focusedName, equals: draft.id)
+                            .onSubmit { model.apply() }
+                            // Cut as it is typed, so the field never shows more
+                            // than the name that is kept.
+                            .onChange(of: draft.name) { _, name in
+                                if name.count > AccountNames.maxLength {
+                                    draft.name = String(name.prefix(AccountNames.maxLength))
+                                }
+                            }
+                    }
 
                     Button {
                         model.removeAddressRow(draft.id)
@@ -458,11 +485,20 @@ struct AddressList: View {
             Text("Every account adds a request to each poll, and a poll runs about every 30 s.")
                 .font(Typography.secondary).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
+
+            // Hiding values masks addresses and amounts but not names, which
+            // would otherwise come as a surprise during a screen share.
+            Text("Names stay on this Mac, and stay visible while values are hidden.")
+                .font(Typography.secondary).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
         }
         // Leaving a row commits it, the same contract as the URL fields;
         // apply() never tears down a running watch over an invalid or empty
         // draft, so this is always safe.
         .onChange(of: focused) { old, _ in
+            if old != nil { model.apply() }
+        }
+        .onChange(of: focusedName) { old, _ in
             if old != nil { model.apply() }
         }
     }

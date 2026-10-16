@@ -113,6 +113,19 @@ extension EnvironmentValues {
     }
 }
 
+/// The names the user gave the watched accounts, beside `valuesHidden` for the
+/// same reach: every view that names an account reads them unasked.
+private struct AccountNamesKey: EnvironmentKey {
+    static let defaultValue = AccountNames()
+}
+
+extension EnvironmentValues {
+    var accountNames: AccountNames {
+        get { self[AccountNamesKey.self] }
+        set { self[AccountNamesKey.self] = newValue }
+    }
+}
+
 /// Severity of a row, taken from the alert that names it.
 ///
 /// Colour in a row is a pointer, not the message: it marks *which* fact the
@@ -248,10 +261,21 @@ enum Format {
     }
 
     /// A shortened address, or its mask, on the same terms as `algosLabel`.
-    /// Every surface that names an account goes through here, so a new one
-    /// cannot show a real address while values are hidden.
+    /// Every surface that shows an address goes through here, by itself or
+    /// through `accountLabel`, so a new one cannot show a real address while
+    /// values are hidden.
     static func addressLabel(_ value: String, hidden: Bool) -> String {
         hidden ? Self.hidden() : address(value)
+    }
+
+    /// What an account goes by: the name the user gave it, otherwise its short
+    /// address or that address's mask. A name is never masked. It is the
+    /// user's own label, and what tells the accounts apart while their
+    /// addresses are hidden.
+    static func accountLabel(
+        _ address: AlgorandAddress, names: AccountNames, hidden: Bool
+    ) -> String {
+        names.label(for: address, otherwise: addressLabel(address.stringValue, hidden: hidden))
     }
 
     /// Compact and, crucially, **fixed width**. A menu bar item that grows a

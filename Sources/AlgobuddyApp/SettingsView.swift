@@ -852,12 +852,12 @@ struct MenuBarMetricPicker: View {
             HStack(spacing: 6) {
                 Text("Preview")
                     .font(Typography.secondary).foregroundStyle(.secondary)
-                Image(systemName: model.health.symbol).foregroundStyle(model.health.tint)
+                // The menu bar's own image, so the preview is the item exactly.
                 // Before the first poll it shows the stand-ins the menu bar
                 // shows, which are about as wide as the figures to come.
-                if let text = model.menuBarText {
-                    Text(text).font(Typography.menuRow).monospacedDigit()
-                }
+                Image(
+                    nsImage: MenuBarImage.render(
+                        symbol: model.health.symbol, text: model.menuBarText))
                 Spacer()
                 Text("≈\(Int(width)) pt")
                     .font(Typography.secondary).monospacedDigit()

@@ -45,19 +45,10 @@ struct MenuBarLabel: View {
     let model: AppModel
 
     var body: some View {
-        HStack(spacing: 4) {
-            Image(systemName: model.health.symbol)
-                .foregroundStyle(model.health.tint)
-            if let text = model.menuBarText {
-                Text(text)
-                    // Asks for digits of one width, so the label keeps its
-                    // width as figures change. The menu bar has been seen to
-                    // draw the label as plain text in its own font regardless,
-                    // where a 1 is narrower than an 8, which is why the
-                    // stand-ins in AppModel allow for a few points.
-                    .monospacedDigit()
-            }
-        }
-        .accessibilityLabel("algobuddy: \(model.health.label)")
+        // One image, which is the only way the Algorand mark can sit in the
+        // text. Its digits are the font's own, where a 1 is narrower than an
+        // 8, which is why the stand-ins in AppModel allow for a few points.
+        Image(nsImage: MenuBarImage.render(symbol: model.health.symbol, text: model.menuBarText))
+            .accessibilityLabel("algobuddy: \(model.health.label)")
     }
 }

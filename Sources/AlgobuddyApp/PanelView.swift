@@ -487,8 +487,11 @@ struct PortfolioCard: View {
                 HStack(spacing: 6) {
                     Text(participationText).font(Typography.primary.weight(.medium))
                     Spacer()
-                    Text(Format.algosLabel(summary.totalStake, hidden: isHidden))
-                        .font(Typography.primary.monospacedDigit())
+                    Text(
+                        algos: Format.algosLabel(summary.totalStake, hidden: isHidden),
+                        style: .body
+                    )
+                    .font(Typography.primary.monospacedDigit())
                 }
 
                 if summary.hasRewards {
@@ -571,7 +574,7 @@ struct AccountCard: View {
                 Circle().fill(account.statusTint).frame(width: 8, height: 8)
                 Text(account.statusText).font(Typography.primary.weight(.medium))
                 Spacer()
-                Text(Format.algosLabel(account.amount, hidden: isHidden))
+                Text(algos: Format.algosLabel(account.amount, hidden: isHidden), style: .body)
                     .font(Typography.primary.monospacedDigit())
             }
 
@@ -692,7 +695,8 @@ struct ProposalsGrid: View {
                 .font(Typography.primary.monospacedDigit())
                 .gridColumnAlignment(.trailing)
 
-            Text(earned.map { Format.algosLabel($0, hidden: isHidden) } ?? "–")
+            (earned.map { Text(algos: Format.algosLabel($0, hidden: isHidden), style: .body) }
+                ?? Text("–"))
                 .font(Typography.primary.monospacedDigit())
                 .foregroundStyle(.secondary)
                 .gridColumnAlignment(.trailing)
@@ -866,8 +870,10 @@ struct AccountRow: View {
                     // the amount and whether values are hidden, and the row
                     // keeps its height when values are hidden.
                     ZStack(alignment: .trailing) {
-                        Text(Format.widestRowAmount).hidden()
-                        Text(Format.rowAlgosLabel(account.amount, hidden: isHidden))
+                        Text(algos: Format.widestRowAmount, style: .subheadline).hidden()
+                        Text(
+                            algos: Format.rowAlgosLabel(account.amount, hidden: isHidden),
+                            style: .subheadline)
                     }
                     .font(Typography.secondary.monospacedDigit())
                     .foregroundStyle(.secondary)

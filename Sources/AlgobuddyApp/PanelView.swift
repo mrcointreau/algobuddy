@@ -860,9 +860,16 @@ struct AccountRow: View {
                 Spacer()
 
                 if let account = entry.account {
-                    Text(Format.algosLabel(account.amount, hidden: isHidden))
-                        .font(Typography.secondary.monospacedDigit())
-                        .foregroundStyle(.secondary)
+                    // The widest amount a row shows holds the column, never
+                    // drawn, so the facts beside it have the same room whatever
+                    // the amount and whether values are hidden, and the row
+                    // keeps its height when values are hidden.
+                    ZStack(alignment: .trailing) {
+                        Text(Format.widestRowAmount).hidden()
+                        Text(Format.rowAlgosLabel(account.amount, hidden: isHidden))
+                    }
+                    .font(Typography.secondary.monospacedDigit())
+                    .foregroundStyle(.secondary)
                 }
                 Image(systemName: "chevron.right")
                     .font(Typography.secondary)
@@ -1115,10 +1122,13 @@ private struct PanelWindowKeeper: NSViewRepresentable {
         var onClose: () -> Void = {}
         var animates = true
         private var observers: [any NSObjectProtocol] = []
-        /// Whether the window has been fitted since the panel last opened. The
-        /// first fit of each opening is immediate: there is no earlier size
-        /// on screen for an animation to start from.
+        /// Whether a fit has run with the panel on screen since it last opened,
+        /// whether or not it changed the size. The first of each opening is
+        /// immediate: there is no earlier size on screen for an animation to
+        /// start from. Every later one animates.
         private var hasFitted = false
+        /// The content height last asked for, which the opening fit uses.
+        private var requestedHeight: CGFloat = 0
         /// The menu bar item the open panel hangs from. See `attach()`.
         private weak var item: NSWindow?
         /// The edge of the item the system lined the panel up with, and how
@@ -1154,19 +1164,32 @@ private struct PanelWindowKeeper: NSViewRepresentable {
                     }
                 },
                 // And becomes key as it opens, already placed under its item.
+                // It is fitted then, once it is on screen, whatever SwiftUI
+                // asked for while laying it out before.
                 center.addObserver(
                     forName: NSWindow.didBecomeKeyNotification, object: window, queue: .main
                 ) { [weak self] _ in
-                    MainActor.assumeIsolated { self?.attach() }
+                    MainActor.assumeIsolated { self?.opened() }
                 },
             ]
+            // Already key, this view having joined the window after it opened.
+            if window.isKeyWindow { opened() }
+        }
+
+        private func opened() {
+            attach()
+            fit(to: requestedHeight)
         }
 
         /// Sizes the window so the space SwiftUI gives the panel matches the
         /// content. This view sits behind a frame that fills that space, so its
         /// own height is the space, whatever the window wraps around it.
         func fit(to height: CGFloat) {
+            requestedHeight = height
             guard height > 0, bounds.height > 0, let window else { return }
+            // The opening fit usually finds the size already right, and it
+            // still counts, so the first change after it animates.
+            defer { if window.isVisible { hasFitted = true } }
             let change = height - bounds.height
             guard abs(change) > 0.5 else { return }
             var frame = window.frame
@@ -1175,7 +1198,6 @@ private struct PanelWindowKeeper: NSViewRepresentable {
             frame.origin.y = top - frame.size.height
             if let x = anchoredX(width: frame.width) { frame.origin.x = x }
             place(frame, animated: animates && hasFitted && window.isVisible)
-            hasFitted = true
         }
 
         /// Finds the menu bar item the panel opened under, and notes where the

@@ -531,7 +531,7 @@ struct AddressField: View {
         } catch AlgorandAddress.AddressError.badLength(let count) {
             return ("circle.dotted", .secondary, "\(count)/58 characters")
         } catch AlgorandAddress.AddressError.checksumMismatch {
-            return ("xmark.circle.fill", .red, "Checksum does not match, likely a typo")
+            return ("xmark.circle.fill", .red, "Checksum does not match")
         } catch {
             return ("xmark.circle.fill", .red, "Not a valid address")
         }
@@ -542,7 +542,15 @@ struct AddressField: View {
     private var consequence: String? {
         let trimmed = draft.text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, (try? AlgorandAddress(trimmed)) == nil else { return nil }
-        return draft.held == nil ? "Not watched until valid" : "Still watching the previous address"
+        return draft.held == nil ? "not watched until valid" : "still watching the previous address"
+    }
+
+    /// Both on one line beneath the field, such as "6/58 characters · not
+    /// watched until valid". The line is always there and blank when there is
+    /// nothing to say, so the form, and the onboarding panel, keep their height
+    /// while an address is typed. Short enough to fit either on one line.
+    private var note: String {
+        [validity?.note, consequence].compactMap { $0 }.joined(separator: " · ")
     }
 
     var body: some View {
@@ -563,12 +571,10 @@ struct AddressField: View {
                     Image(systemName: validity.symbol).foregroundStyle(validity.tint)
                 }
             }
-            if let note = validity?.note {
-                Text(note).font(Typography.secondary).foregroundStyle(.secondary)
-            }
-            if let consequence {
-                Text(consequence).font(Typography.secondary).foregroundStyle(.secondary)
-            }
+            Text(note.isEmpty ? " " : note)
+                .font(Typography.secondary).foregroundStyle(.secondary)
+                .lineLimit(1)
+                .accessibilityHidden(note.isEmpty)
         }
     }
 }

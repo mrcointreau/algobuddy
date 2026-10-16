@@ -50,8 +50,11 @@ struct MenuBarLabel: View {
                 .foregroundStyle(model.health.tint)
             if let text = model.menuBarText {
                 Text(text)
-                    // Without this the label jitters every round and drags the
-                    // neighbouring menu bar items sideways with it.
+                    // Asks for digits of one width, so the label keeps its
+                    // width as figures change. The menu bar has been seen to
+                    // draw the label as plain text in its own font regardless,
+                    // where a 1 is narrower than an 8, which is why the
+                    // stand-ins in AppModel allow for a few points.
                     .monospacedDigit()
             }
         }

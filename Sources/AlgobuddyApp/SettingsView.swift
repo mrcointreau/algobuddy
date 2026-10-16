@@ -30,9 +30,10 @@ struct OnboardingView: View {
             ) { model.apply() }
 
             // Without this, a bad stored URL would make Start a silent no-op:
-            // the panel has no URL fields, so the reason has to be said here.
+            // the panel has no URL fields, so the reason, and the pane that
+            // holds them, has to be said here.
             if let error = model.sourceError {
-                Text("\(error) Fix it in Settings (⌘,).")
+                Text("\(error) Fix it in Settings (⌘,), under Data Source.")
                     .font(Typography.secondary).foregroundStyle(.red)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -53,18 +54,238 @@ struct OnboardingView: View {
     }
 }
 
-/// The Settings window's content.
+/// The Settings window's content: four panes, each a group of related
+/// settings, chosen from the window's toolbar.
 ///
-/// A `Form` with `.formStyle(.grouped)`, which is what gives the native System
-/// Settings appearance: right-aligned leading labels in a consistent column,
-/// grouped sections, correct control sizing. Hand-rolling the layout gives
-/// labels of differing widths and fields that do not line up.
+/// A `TabView` in a Settings scene is what gives the native settings window: a
+/// toolbar of panes that always shows the active one, and a window titled
+/// after that pane. Each pane is a `Form` with `.formStyle(.grouped)`, which is
+/// what gives the native System Settings appearance: right-aligned leading
+/// labels in a consistent column, grouped sections, correct control sizing.
+/// Hand-rolling the layout gives labels of differing widths and fields that do
+/// not line up.
 ///
 /// Changes take effect as they are made, as macOS settings do, rather than
-/// behind an Apply button. Text fields commit on Return, on focus loss, and
-/// when the window closes, which avoids restarting the poller on every
-/// keystroke of a URL while leaving no way to lose an edit.
+/// behind an Apply button. Text fields commit on Return, on focus loss, on a
+/// switch to another pane, and when the window closes, rather than on every
+/// keystroke, which would restart the poller with each character of a URL.
 struct SettingsView: View {
+    @Bindable var model: AppModel
+    /// HIG: "Restore the most recently viewed pane." Settings are often
+    /// adjusted more than once, so the window opens where it was left.
+    @AppStorage("settingsPane") private var pane = SettingsPane.general
+    /// The tallest a pane can be, which the window measures on its screen.
+    @State private var paneHeightLimit = FitsScreenHeight.estimatedLimit
+
+    var body: some View {
+        TabView(selection: $pane) {
+            GeneralPane(model: model)
+                .modifier(PaneLayout(heightLimit: paneHeightLimit))
+                .tabItem { Label("General", systemImage: "gearshape") }
+                .tag(SettingsPane.general)
+            AccountsPane(model: model)
+                .modifier(PaneLayout(heightLimit: paneHeightLimit))
+                .tabItem { Label("Accounts", systemImage: "person.crop.circle") }
+                .tag(SettingsPane.accounts)
+            MenuBarPane(model: model)
+                .modifier(PaneLayout(heightLimit: paneHeightLimit))
+                .tabItem { Label("Menu Bar", systemImage: "menubar.rectangle") }
+                .tag(SettingsPane.menuBar)
+            DataSourcePane(model: model)
+                .modifier(PaneLayout(heightLimit: paneHeightLimit))
+                .tabItem { Label("Data Source", systemImage: "server.rack") }
+                .tag(SettingsPane.dataSource)
+        }
+        // A switch to another pane takes the field being typed in away
+        // without moving focus out of it, so the edit is committed here, as it
+        // would be on leaving the field.
+        .onChange(of: pane) { model.apply() }
+        .background(
+            SettingsWindowKeeper(
+                onHeightLimit: { paneHeightLimit = $0 },
+                // Closing the window commits too. Dismissing the window does
+                // not move focus out of the field being typed in, so without
+                // this an address entered and then dismissed would sit in the
+                // edit buffer, watched by nothing, until the window was next
+                // opened.
+                onClose: { model.apply() }))
+    }
+}
+
+/// The panes, in toolbar order. Stored by raw value, and a stored value that
+/// names no pane opens General.
+private enum SettingsPane: String {
+    case general, accounts, menuBar, dataSource
+}
+
+/// What belongs to the app itself rather than to what it watches: how it
+/// starts, whether it notifies, and which build it is.
+private struct GeneralPane: View {
+    @Bindable var model: AppModel
+
+    var body: some View {
+        Form {
+            Section {
+                LaunchAtLoginRow(model: model)
+                NotificationsRow(model: model)
+            }
+            VersionFooter(model: model)
+        }
+    }
+}
+
+/// The watched accounts, in the order every other surface presents them, and
+/// the one pane that grows with use.
+///
+/// Uncapped, like the menu bar metrics, and for the same reason: every address
+/// adds its fetches to each cycle, and that trade is the user's to make. The
+/// cost is stated rather than prevented.
+private struct AccountsPane: View {
+    @Bindable var model: AppModel
+    /// Focus is owned here rather than by each row, so that a newly added row
+    /// can be typed into straight away and so that leaving any row commits it.
+    @FocusState private var focused: AddressDraft.ID?
+    /// The name fields' focus, kept apart from the address fields' because
+    /// `AddressField` also serves onboarding, which asks for no name.
+    @FocusState private var focusedName: AddressDraft.ID?
+
+    /// The rows that name an account an earlier row already names. Compared as
+    /// addresses rather than as text, so a repeat pasted in another case is
+    /// still caught. Silently watching such a row once and showing it twice
+    /// here would leave the user with no way to tell why nothing happened.
+    private var repeats: Set<AddressDraft.ID> {
+        var seen = Set<AlgorandAddress>()
+        var found = Set<AddressDraft.ID>()
+        for draft in model.addressDrafts {
+            guard let address = try? AlgorandAddress(draft.text) else { continue }
+            if !seen.insert(address).inserted { found.insert(draft.id) }
+        }
+        return found
+    }
+
+    /// The only row, holding no text, no name and no account. It is where the
+    /// next address is typed, and removing it would leave the same blank row.
+    private func isLoneBlankRow(_ draft: AddressDraft) -> Bool {
+        model.addressDrafts.count == 1 && draft.held == nil && draft.name.isEmpty
+            && draft.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    var body: some View {
+        let repeats = self.repeats
+
+        Form {
+            ForEach($model.addressDrafts) { $draft in
+                // A box for each account keeps each name with its own address.
+                Section {
+                    // The labels in a column of their own and each field
+                    // filling the rest, as in the Data Source pane, so the
+                    // fields keep one width whatever is typed.
+                    Grid(
+                        alignment: .leadingFirstTextBaseline, horizontalSpacing: 8,
+                        verticalSpacing: 4
+                    ) {
+                        GridRow {
+                            FieldLabel("Address")
+                            AddressField(
+                                draft: $draft, focus: $focused, isMasked: model.valuesHidden,
+                                isRepeat: repeats.contains(draft.id)
+                            ) { model.apply() }
+                            .labelsHidden()
+                        }
+                        GridRow {
+                            FieldLabel("Name")
+                            HStack(spacing: 8) {
+                                // Never masked: a name is the user's own label,
+                                // and what tells the accounts apart while
+                                // values are hidden.
+                                TextField(
+                                    "Name", text: $draft.name, prompt: Text("Optional")
+                                )
+                                .labelsHidden()
+                                .font(Typography.primary)
+                                .focused($focusedName, equals: draft.id)
+                                .onSubmit { model.apply() }
+                                // Cut as it is typed, so the field never shows
+                                // more than the name that is kept.
+                                .onChange(of: draft.name) { _, name in
+                                    if name.count > AccountNames.maxLength {
+                                        draft.name = String(name.prefix(AccountNames.maxLength))
+                                    }
+                                }
+                                // HIG: "match the size of a text field to the
+                                // quantity of anticipated text." Wide enough
+                                // for a typical name of the full length.
+                                .frame(width: 220)
+
+                                Spacer()
+
+                                // In words rather than as a symbol, which on
+                                // its own would leave the button's purpose to
+                                // be guessed.
+                                Button("Remove") { model.removeAddressRow(draft.id) }
+                                    .disabled(isLoneBlankRow(draft))
+                                    .accessibilityLabel("Remove this account")
+                            }
+                        }
+                    }
+                } footer: {
+                    // Below the last account, where the next one is added.
+                    if draft.id == model.addressDrafts.last?.id {
+                        VStack(alignment: .leading, spacing: Spacing.row) {
+                            Button("Add Account", systemImage: "plus") {
+                                focused = model.addAddressRow()
+                            }
+
+                            // The consequence, said plainly, in place of a
+                            // limit nobody asked for. Nothing else about the
+                            // app changes with the count: the same two hosts
+                            // are contacted whatever it is.
+                            Text(
+                                "Every account adds a request to each poll, and a poll runs about every 30 s."
+                            )
+                            .font(Typography.secondary).foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+
+                            // Hiding values masks addresses and amounts but
+                            // not names, which would otherwise come as a
+                            // surprise during a screen share.
+                            Text(
+                                "Names stay on this Mac, and stay visible while values are hidden."
+                            )
+                            .font(Typography.secondary).foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                }
+            }
+        }
+        // Leaving a row commits it, the same contract as the URL fields;
+        // apply() never tears down a running watch over an invalid or empty
+        // draft, so this is always safe.
+        .onChange(of: focused) { old, _ in
+            if old != nil { model.apply() }
+        }
+        .onChange(of: focusedName) { old, _ in
+            if old != nil { model.apply() }
+        }
+    }
+}
+
+/// What the menu bar item shows.
+private struct MenuBarPane: View {
+    @Bindable var model: AppModel
+
+    var body: some View {
+        Form {
+            Section {
+                MenuBarMetricPicker(model: model)
+            }
+        }
+    }
+}
+
+/// Where the chain data comes from, and what that choice reveals.
+private struct DataSourcePane: View {
     @Bindable var model: AppModel
 
     private enum URLField {
@@ -74,28 +295,32 @@ struct SettingsView: View {
 
     var body: some View {
         Form {
-            Section("General") {
-                LaunchAtLoginRow(model: model)
-            }
-
-            Section("Account") {
-                AddressList(model: model)
-            }
-
-            Section("Menu bar") {
-                MenuBarMetricPicker(model: model)
-            }
-
-            Section("Chain data source") {
-                TextField("algod", text: $model.algodURLText)
-                    .focused($focusedURL, equals: .algod)
-                    .onSubmit { model.apply() }
-                TextField("indexer", text: $model.indexerURLText)
-                    .focused($focusedURL, equals: .indexer)
-                    .onSubmit { model.apply() }
+            Section {
+                // The labels in a column of their own, and each field filling
+                // the rest of the row. In the form's own row, a bordered field
+                // moves below its label once its text is longer than the
+                // field, which changes the row's height as a long URL is typed.
+                Grid(
+                    alignment: .leadingFirstTextBaseline, horizontalSpacing: 8, verticalSpacing: 8
+                ) {
+                    GridRow {
+                        FieldLabel("algod")
+                        TextField("algod", text: $model.algodURLText)
+                            .labelsHidden()
+                            .focused($focusedURL, equals: .algod)
+                            .onSubmit { model.apply() }
+                    }
+                    GridRow {
+                        FieldLabel("indexer")
+                        TextField("indexer", text: $model.indexerURLText)
+                            .labelsHidden()
+                            .focused($focusedURL, equals: .indexer)
+                            .onSubmit { model.apply() }
+                    }
+                }
 
                 // The error belongs to these fields, so it renders here rather
-                // than under the address input in another section.
+                // than under the address input in another pane.
                 if let error = model.sourceError {
                     Text(error).font(Typography.secondary).foregroundStyle(.red)
                 }
@@ -108,34 +333,6 @@ struct SettingsView: View {
                 .font(Typography.secondary).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
             }
-
-            Section("Notifications") {
-                // Checkbox, not a switch: switches are the iOS idiom, and macOS
-                // settings use checkboxes. Routed through the model so turning
-                // it on can request system authorisation right now, not at the
-                // next address submit.
-                Toggle(
-                    "Notify on alerts",
-                    isOn: Binding(
-                        get: { model.notificationsEnabled },
-                        set: { model.setNotifications(enabled: $0) })
-                )
-                .toggleStyle(.checkbox)
-
-                // The toggle states what the user wants, not what macOS
-                // allows, so a refusal is said beside it.
-                if model.notificationsBlocked {
-                    HStack(spacing: 6) {
-                        Text("Notifications for algobuddy are off in System Settings.")
-                            .font(Typography.secondary).foregroundStyle(.orange)
-                            .fixedSize(horizontal: false, vertical: true)
-                        Button("Open Notifications") { model.openNotificationSettings() }
-                            .buttonStyle(.link).font(Typography.secondary)
-                    }
-                }
-            }
-
-            VersionFooter(model: model)
         }
         // Leaving a field commits it, the same contract as AddressField: an
         // edit abandoned by clicking elsewhere must not sit in the bound text
@@ -145,26 +342,53 @@ struct SettingsView: View {
         .onChange(of: focusedURL) { old, _ in
             if old != nil { model.apply() }
         }
-        // Closing the window commits too. Dismissing the pane does not move
-        // focus out of the field being typed in, so without this an address
-        // entered and then dismissed would sit in the edit buffer, watched by
-        // nothing, until the pane was next opened.
-        .background(CommitOnClose { model.apply() })
-        .formStyle(.grouped)
-        // The form takes one height whatever the window offers, so
-        // `.windowResizability(.contentSize)` fits the window to it exactly,
-        // and the form scrolls only when the screen is too short for it.
-        .modifier(FitsScreenHeight())
-        .frame(width: 480)
     }
 }
 
-/// Gives the form its content's height, up to the height of the screen less
-/// the window's title bar. Every account adds a row, and a window taller than
-/// the screen leaves its lower controls out of reach.
-private struct FitsScreenHeight: ViewModifier {
+/// What every pane shares.
+private struct PaneLayout: ViewModifier {
+    let heightLimit: CGFloat
+
     func body(content: Content) -> some View {
-        Fit(limit: Self.limit) { content }
+        content
+            .formStyle(.grouped)
+            // A grouped form otherwise draws a text field as plain text, which
+            // reads as a label rather than as somewhere to type.
+            .textFieldStyle(.roundedBorder)
+            // The form takes one height whatever the window offers, so
+            // `.windowResizability(.contentSize)` fits the window to it
+            // exactly, and the form scrolls only when the screen is too short
+            // for it. One width for every pane, so a switch changes only the
+            // window's height.
+            .modifier(FitsScreenHeight(limit: heightLimit))
+            .frame(width: 480)
+    }
+}
+
+/// A text field's label, set in a column of its own beside the field.
+///
+/// The field keeps its own label, hidden on screen, and that is the one
+/// VoiceOver reads, so this one is hidden from VoiceOver rather than read twice.
+private struct FieldLabel: View {
+    let title: String
+
+    init(_ title: String) {
+        self.title = title
+    }
+
+    var body: some View {
+        Text(title).accessibilityHidden(true)
+    }
+}
+
+/// Gives a pane its content's height, up to the height of the window's screen
+/// less the window's title bar and toolbar. Every account adds a row, and a
+/// window taller than the screen leaves its lower controls out of reach.
+private struct FitsScreenHeight: ViewModifier {
+    let limit: CGFloat
+
+    func body(content: Content) -> some View {
+        Fit(limit: limit) { content }
     }
 
     /// Asked for its size with no height proposed, a grouped form answers with
@@ -179,8 +403,13 @@ private struct FitsScreenHeight: ViewModifier {
         ) -> CGSize {
             let natural = subviews[0].sizeThatFits(
                 ProposedViewSize(width: proposal.width, height: nil))
+            // Rounded up to a whole point. The window's frame is in whole
+            // points and rounds a fraction either way, depending on the pane
+            // shown before, so the same pane would otherwise open a point
+            // taller one time than another.
             return CGSize(
-                width: proposal.width ?? natural.width, height: min(natural.height, limit))
+                width: proposal.width ?? natural.width,
+                height: min(natural.height.rounded(.up), limit))
         }
 
         func placeSubviews(
@@ -190,52 +419,107 @@ private struct FitsScreenHeight: ViewModifier {
         }
     }
 
-    private static var limit: CGFloat {
+    /// The main screen less a title bar, until the window has measured its
+    /// own screen, title bar and toolbar.
+    static var estimatedLimit: CGFloat {
         let titleBar = NSWindow.frameRect(forContentRect: .zero, styleMask: .titled).height
         return (NSScreen.main?.visibleFrame.height ?? 800) - titleBar
     }
 }
 
-/// Runs a commit when the window holding this view is about to close.
+/// Keeps the Settings window whole on its screen as it resizes, tells the
+/// panes how tall they can be there, and runs a commit when the window is
+/// about to close.
 ///
 /// SwiftUI has no window lifecycle to hook from a Settings scene, so the
-/// closing window is reached through an invisible AppKit view planted behind
-/// the form. The observation is scoped to that one window, so the panel opening
+/// window is reached through an invisible AppKit view planted behind the
+/// panes. Every observation is scoped to that one window, so the panel opening
 /// and closing all day never triggers a commit.
-private struct CommitOnClose: NSViewRepresentable {
-    let commit: () -> Void
+private struct SettingsWindowKeeper: NSViewRepresentable {
+    /// Receives the tallest a pane can be on the window's screen.
+    let onHeightLimit: (CGFloat) -> Void
+    let onClose: () -> Void
 
-    func makeNSView(context: Context) -> CloseCommitView {
-        let view = CloseCommitView()
-        view.commit = commit
+    func makeNSView(context: Context) -> KeeperView {
+        let view = KeeperView()
+        updateNSView(view, context: context)
         return view
     }
 
-    func updateNSView(_ view: CloseCommitView, context: Context) {
-        view.commit = commit
+    func updateNSView(_ view: KeeperView, context: Context) {
+        view.onHeightLimit = onHeightLimit
+        view.onClose = onClose
     }
-}
 
-/// The planted view. It has no window until AppKit places it in a hierarchy,
-/// which is why the observer is registered from `viewDidMoveToWindow` rather
-/// than at construction, and removed there when the view leaves a window so no
-/// observation outlives the pane.
-private final class CloseCommitView: NSView {
-    var commit: () -> Void = {}
-    private var observer: (any NSObjectProtocol)?
+    /// The planted view. It has no window until AppKit places it in a
+    /// hierarchy, which is why the observers are registered from
+    /// `viewDidMoveToWindow` rather than at construction, and removed there
+    /// when the view leaves a window so no observation outlives the window.
+    final class KeeperView: NSView {
+        var onHeightLimit: (CGFloat) -> Void = { _ in }
+        var onClose: () -> Void = {}
+        private var observers: [any NSObjectProtocol] = []
+        private var reportedLimit: CGFloat?
 
-    override func viewDidMoveToWindow() {
-        super.viewDidMoveToWindow()
-        if let observer {
-            NotificationCenter.default.removeObserver(observer)
-            self.observer = nil
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            for observer in observers {
+                NotificationCenter.default.removeObserver(observer)
+            }
+            observers = []
+            guard let window else { return }
+            let center = NotificationCenter.default
+            // Each is posted on the main thread, where this view and the model
+            // live.
+            observers = [
+                center.addObserver(
+                    forName: NSWindow.willCloseNotification, object: window, queue: .main
+                ) { [weak self] _ in
+                    MainActor.assumeIsolated { self?.onClose() }
+                },
+                center.addObserver(
+                    forName: NSWindow.didResizeNotification, object: window, queue: .main
+                ) { [weak self] _ in
+                    MainActor.assumeIsolated { self?.fit() }
+                },
+                center.addObserver(
+                    forName: NSWindow.didChangeScreenNotification, object: window, queue: .main
+                ) { [weak self] _ in
+                    MainActor.assumeIsolated { self?.fit() }
+                },
+                // A change to the displays, such as another resolution, moves
+                // the screen's edges without resizing the window.
+                center.addObserver(
+                    forName: NSApplication.didChangeScreenParametersNotification, object: nil,
+                    queue: .main
+                ) { [weak self] _ in
+                    MainActor.assumeIsolated { self?.fit() }
+                },
+            ]
+            // Measured as the view joins the window, and again after every
+            // resize and every change of screen.
+            fit()
         }
-        guard let window else { return }
-        observer = NotificationCenter.default.addObserver(
-            forName: NSWindow.willCloseNotification, object: window, queue: .main
-        ) { [weak self] _ in
-            // Posted on the main thread, where this view and the model live.
-            MainActor.assumeIsolated { self?.commit() }
+
+        private func fit() {
+            guard let window, let screen = window.screen ?? NSScreen.main else { return }
+            let visible = screen.visibleFrame
+            let chrome = window.frame.height - window.contentLayoutRect.height
+            let limit = visible.height - chrome
+            if limit != reportedLimit {
+                reportedLimit = limit
+                // Set after the current update: the limit is SwiftUI state,
+                // and a resize can be reported while SwiftUI is updating.
+                DispatchQueue.main.async { [weak self] in self?.onHeightLimit(limit) }
+            }
+            // The window takes each pane's height from its top edge, so a
+            // taller pane, or another account, can take its bottom below the
+            // screen's. It moves up just far enough to stay whole.
+            let frame = window.frame
+            if frame.minY < visible.minY {
+                window.setFrameOrigin(
+                    NSPoint(x: frame.minX, y: min(visible.minY, visible.maxY - frame.height)))
+            }
         }
     }
 }
@@ -278,8 +562,8 @@ struct VersionFooter: View {
                 }
             }
 
-            // The same disclosure the chain data source section makes: the one
-            // place this pane reaches a host the user did not configure.
+            // The same disclosure the Data Source pane makes: the one place
+            // this pane reaches a host the user did not configure.
             Text("The check contacts github.com, and only when you click.")
                 .font(Typography.secondary)
                 .foregroundStyle(.secondary)
@@ -354,6 +638,38 @@ private struct LinkedResult: View {
     }
 }
 
+/// On by default, and routed through the model so turning it on can request
+/// system authorisation right now, not at the next address submit.
+struct NotificationsRow: View {
+    @Bindable var model: AppModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            // Checkbox, not a switch: switches are the iOS idiom, and macOS
+            // settings use checkboxes.
+            Toggle(
+                "Notify on alerts",
+                isOn: Binding(
+                    get: { model.notificationsEnabled },
+                    set: { model.setNotifications(enabled: $0) })
+            )
+            .toggleStyle(.checkbox)
+
+            // The toggle states what the user wants, not what macOS allows, so
+            // a refusal is said beside it.
+            if model.notificationsBlocked {
+                HStack(spacing: 6) {
+                    Text("Notifications for algobuddy are off in System Settings.")
+                        .font(Typography.secondary).foregroundStyle(.orange)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Button("Open Notifications") { model.openNotificationSettings() }
+                        .buttonStyle(.link).font(Typography.secondary)
+                }
+            }
+        }
+    }
+}
+
 /// Opt-in, off by default. Nothing should add itself to a person's login items
 /// without being asked.
 ///
@@ -397,109 +713,6 @@ struct LaunchAtLoginRow: View {
                 .font(Typography.secondary).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
             }
-        }
-    }
-}
-
-/// The watched accounts, in the order every other surface presents them.
-///
-/// Uncapped, like the menu bar metrics, and for the same reason: every address
-/// adds its fetches to each cycle, and that trade is the user's to make. The
-/// cost is stated rather than prevented.
-struct AddressList: View {
-    @Bindable var model: AppModel
-    /// Focus is owned here rather than by each row, so that a newly added row
-    /// can be typed into straight away and so that leaving any row commits it.
-    @FocusState private var focused: AddressDraft.ID?
-    /// The name fields' focus, kept apart from the address fields' because
-    /// `AddressField` also serves onboarding, which asks for no name.
-    @FocusState private var focusedName: AddressDraft.ID?
-
-    /// The rows that name an account an earlier row already names. Compared as
-    /// addresses rather than as text, so a repeat pasted in another case is
-    /// still caught. Silently watching such a row once and showing it twice
-    /// here would leave the user with no way to tell why nothing happened.
-    private var repeats: Set<AddressDraft.ID> {
-        var seen = Set<AlgorandAddress>()
-        var found = Set<AddressDraft.ID>()
-        for draft in model.addressDrafts {
-            guard let address = try? AlgorandAddress(draft.text) else { continue }
-            if !seen.insert(address).inserted { found.insert(draft.id) }
-        }
-        return found
-    }
-
-    var body: some View {
-        let repeats = self.repeats
-
-        VStack(alignment: .leading, spacing: Spacing.row) {
-            ForEach($model.addressDrafts) { $draft in
-                // A rule between accounts, as between the rows of a grouped
-                // form, keeps each name with its own address, since an account
-                // takes two lines.
-                if draft.id != model.addressDrafts.first?.id {
-                    Divider()
-                }
-                HStack(spacing: 6) {
-                    VStack(alignment: .leading, spacing: 4) {
-                        AddressField(
-                            draft: $draft, focus: $focused, isMasked: model.valuesHidden,
-                            isRepeat: repeats.contains(draft.id)
-                        ) { model.apply() }
-
-                        // Never masked: a name is the user's own label, and
-                        // what tells the accounts apart while values are hidden.
-                        // The prompt marks the field while it is empty, since a
-                        // grouped form draws a text field without a border.
-                        TextField("Name", text: $draft.name, prompt: Text("Optional"))
-                            .font(Typography.primary)
-                            .focused($focusedName, equals: draft.id)
-                            .onSubmit { model.apply() }
-                            // Cut as it is typed, so the field never shows more
-                            // than the name that is kept.
-                            .onChange(of: draft.name) { _, name in
-                                if name.count > AccountNames.maxLength {
-                                    draft.name = String(name.prefix(AccountNames.maxLength))
-                                }
-                            }
-                    }
-
-                    Button {
-                        model.removeAddressRow(draft.id)
-                    } label: {
-                        Image(systemName: "minus.circle.fill")
-                    }
-                    .buttonStyle(.borderless)
-                    .foregroundStyle(.secondary)
-                    .accessibilityLabel("Remove this account")
-                }
-            }
-
-            Button("Add Account", systemImage: "plus") {
-                focused = model.addAddressRow()
-            }
-
-            // The consequence, said plainly, in place of a limit nobody asked
-            // for. Nothing else about the app changes with the count: the same
-            // two hosts are contacted whatever it is.
-            Text("Every account adds a request to each poll, and a poll runs about every 30 s.")
-                .font(Typography.secondary).foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-
-            // Hiding values masks addresses and amounts but not names, which
-            // would otherwise come as a surprise during a screen share.
-            Text("Names stay on this Mac, and stay visible while values are hidden.")
-                .font(Typography.secondary).foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        // Leaving a row commits it, the same contract as the URL fields;
-        // apply() never tears down a running watch over an invalid or empty
-        // draft, so this is always safe.
-        .onChange(of: focused) { old, _ in
-            if old != nil { model.apply() }
-        }
-        .onChange(of: focusedName) { old, _ in
-            if old != nil { model.apply() }
         }
     }
 }
@@ -569,6 +782,11 @@ struct AddressField: View {
                 }
                 if let validity {
                     Image(systemName: validity.symbol).foregroundStyle(validity.tint)
+                } else {
+                    // Its place is kept while there is nothing to report, so
+                    // the field keeps one width as the first character is
+                    // typed.
+                    Image(systemName: "circle").hidden()
                 }
             }
             Text(note.isEmpty ? " " : note)

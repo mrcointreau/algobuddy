@@ -12,7 +12,7 @@ import UserNotifications
 ///     log stream --predicate 'subsystem == "dev.algobuddy.app"' --level debug
 let log = Logger(subsystem: "dev.algobuddy.app", category: "app")
 
-/// One row of the Account list, as the user is editing it.
+/// One row of the list in the Accounts pane, as the user is editing it.
 ///
 /// Identified by a token rather than by its text: two rows hold the same
 /// characters while one is being typed into, and rows identified by content
@@ -66,7 +66,7 @@ final class AppModel {
     /// on display, aging visibly via its `observedAt`, until data returns.
     private(set) var lastData: ChainPoller.Update?
     /// A problem with the configured chain data source URLs, rendered in the
-    /// Settings section that owns those fields. Address-shape problems are the
+    /// Data Source pane, which owns those fields. Address-shape problems are the
     /// address field's own live validation, not this.
     private(set) var sourceError: String?
     private(set) var isRunning = false

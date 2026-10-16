@@ -174,6 +174,36 @@ struct AlertEngineTests {
         #expect(duration(20) == "1 minute")
     }
 
+    /// New keys vote only once the balance lookback has passed since their
+    /// registration, so the critical alert says how early to register them,
+    /// and once that is no longer possible, how long the account goes without.
+    @Test("the critical key alert says to register new keys 320 rounds ahead")
+    func criticalKeysNameTheLookback() {
+        func alert(roundsLeft: UInt64, roundTime: TimeInterval = 2.8) -> HealthAlert? {
+            let expiry = KeyExpiry(
+                participation: .init(
+                    voteFirstValid: 0, voteLastValid: 1_000_000 + roundsLeft, voteKeyDilution: 1),
+                currentRound: 1_000_000)
+            return engine.evaluate(Snapshot(roundTime: roundTime, keyExpiry: expiry))
+                .first { $0.id == .keyExpiry }
+        }
+        // 2.5 days ahead: the lead is given in rounds and in time.
+        let early = alert(roundsLeft: 77_142)
+        #expect(early?.severity == .critical)
+        #expect(early?.body.contains("320 rounds (about 15 minutes)") == true)
+        #expect(early?.body.contains("at least that long before these expire") == true)
+        // The time follows the round clock: 320 rounds of 3.6 s are 19 minutes.
+        let slower = alert(roundsLeft: 50_000, roundTime: 3.6)
+        #expect(slower?.body.contains("about 19 minutes") == true)
+        // Exactly the lookback left: registered now, the new keys take over as
+        // the old ones end.
+        #expect(alert(roundsLeft: 320)?.body.contains("at least that long") == true)
+        // Fewer rounds left than that: 120 rounds of 2.8 s go without keys.
+        let late = alert(roundsLeft: 200)
+        #expect(late?.body.contains("register them now: even then") == true)
+        #expect(late?.body.contains("no keys in effect for about 6 minutes") == true)
+    }
+
     @Test("expired keys are critical regardless of the countdown")
     func keyExpired() {
         let expiry = KeyExpiry(

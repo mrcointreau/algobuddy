@@ -585,7 +585,11 @@ struct AccountCard: View {
                     // Raw; MeterRow clamps and guards non-finite values itself,
                     // so a zero-length window degrades to an empty bar.
                     fraction: Double(max(0, expiry.roundsRemaining)) / Double(expiry.totalRounds),
-                    level: level(for: .keyExpiry))
+                    level: level(for: .keyExpiry),
+                    // Exact, where the duration is the round clock's estimate:
+                    // new keys are registered against this round, with the
+                    // lookback the alert names to spare.
+                    caption: "Last valid round \(Format.exactRound(expiry.lastValid))")
             }
 
             ValueRow(title: "Last proposed", detail: lastProposedText)
@@ -1354,6 +1358,8 @@ struct MeterRow: View {
     let detail: String
     let fraction: Double
     let level: MeterLevel
+    /// A fact beneath the bar that the estimate above it does not give.
+    var caption: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
@@ -1372,11 +1378,18 @@ struct MeterRow: View {
             }
             .gaugeStyle(.linearCapacity)
             .tint(level.tint)
+
+            if let caption {
+                Text(caption)
+                    .font(Typography.secondary.monospacedDigit())
+                    .foregroundStyle(.secondary)
+            }
         }
         // Collapse to one element so VoiceOver reads "Participation keys, 66
         // days" rather than spelling out the bar's raw fraction.
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(title)
-        .accessibilityValue(level.spokenValue(for: detail))
+        .accessibilityValue(
+            [level.spokenValue(for: detail), caption].compactMap { $0 }.joined(separator: ", "))
     }
 }

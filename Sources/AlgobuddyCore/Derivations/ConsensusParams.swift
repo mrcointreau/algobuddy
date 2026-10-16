@@ -19,6 +19,11 @@ public struct ConsensusParams: Sendable, Equatable {
     /// Multiplier on the expected proposal interval before an account counts as
     /// absent. This is 20, not 10; see `ledger/eval/eval.go`.
     public let absentFactor: UInt64
+    /// How many rounds back agreement reads an account's balance and keys, so
+    /// keys registered in round r first vote in round r + 320. This is
+    /// `BalanceLookback` in `agreement/selector.go`: twice
+    /// `SeedRefreshInterval` (80) times `SeedLookback` (2).
+    public let balanceLookback: UInt64
 
     public static let v40 = ConsensusParams(
         minBalance: MicroAlgos(30_000_000_000),
@@ -26,7 +31,8 @@ public struct ConsensusParams: Sendable, Equatable {
         challengeInterval: 1000,
         challengeGracePeriod: 200,
         challengeBits: 5,
-        absentFactor: 20
+        absentFactor: 20,
+        balanceLookback: 320
     )
 
     /// Whether a balance sits in the window that earns proposer payouts.

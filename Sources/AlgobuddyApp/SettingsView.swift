@@ -629,9 +629,9 @@ struct MenuBarMetricPicker: View {
                 Text("Preview")
                     .font(Typography.secondary).foregroundStyle(.secondary)
                 Image(systemName: model.health.symbol).foregroundStyle(model.health.tint)
-                // Before the first poll there are no live values, so the
-                // preview falls back to the representative sample.
-                if let text = model.menuBarText ?? (model.metrics.isEmpty ? nil : sample) {
+                // Before the first poll it shows the stand-ins the menu bar
+                // shows, which are about as wide as the figures to come.
+                if let text = model.menuBarText {
                     Text(text).font(Typography.menuRow).monospacedDigit()
                 }
                 Spacer()

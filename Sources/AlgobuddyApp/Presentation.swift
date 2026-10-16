@@ -222,9 +222,11 @@ enum MenuBarMetric: String, CaseIterable, Identifiable {
 }
 
 enum MenuBar {
-    /// The Algorand symbol, U+023A. Verified to render in the menu font, and
-    /// exactly the same width as a plain "A", so the correct symbol is free.
-    /// The panel spells out "ALGO" instead, where there is room for it.
+    /// Where the menu bar text has ALGO, which `MenuBarImage` draws as the
+    /// Algorand mark. The text keeps a letter there, U+023A, the one the mark
+    /// is often typed as, because the text is also measured for the width
+    /// estimate and stored as the remembered shapes. The panel spells out
+    /// "ALGO" instead, where there is room for it.
     static let algo = "\u{023A}"
 
     /// Separator between metrics. Narrow, and the standard macOS way to run

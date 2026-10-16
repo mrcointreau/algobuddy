@@ -424,16 +424,23 @@ struct MenuRowLabel: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            if isBusy {
-                ProgressView()
-                    .controlSize(.small)
-                    .scaleEffect(0.6)
-                    .frame(width: 14)
-            } else {
-                Image(systemName: symbol)
-                    .frame(width: 14)
-                    .foregroundStyle(.secondary)
-            }
+            // The spinner is drawn over the symbol's slot rather than in its
+            // place. It stands a point taller than the symbol, so in its place
+            // it would grow the row, and the panel with it, for as long as a
+            // refresh runs. The symbol it covers is hidden from VoiceOver as
+            // well as from sight.
+            Image(systemName: symbol)
+                .frame(width: 14)
+                .foregroundStyle(.secondary)
+                .opacity(isBusy ? 0 : 1)
+                .accessibilityHidden(isBusy)
+                .overlay {
+                    if isBusy {
+                        ProgressView()
+                            .controlSize(.small)
+                            .scaleEffect(0.6)
+                    }
+                }
             Text(title)
             Spacer()
             if let shortcut {

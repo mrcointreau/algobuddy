@@ -58,6 +58,21 @@ struct ChainPollerTests {
         return await poller.pollOnce()
     }
 
+    /// What the poller publishes while `body` runs, collected until the poller
+    /// stops, so an update that never comes fails the test instead of hanging it.
+    func published(
+        by poller: ChainPoller, during body: () async -> Void
+    ) async -> [ChainPoller.Update] {
+        let collector = Task {
+            var collected = [ChainPoller.Update]()
+            for await update in poller.updates { collected.append(update) }
+            return collected
+        }
+        await body()
+        await poller.stop()
+        return await collector.value
+    }
+
     // MARK: - Happy path
 
     @Test("a full cycle derives every participation signal")
@@ -892,6 +907,117 @@ struct ChainPollerTests {
         let update = await makePoller(stub: stub, clock: clock).pollOnce()
         #expect(update.only?.rewards == nil)
         #expect(stub.requestCount(containing: "block-headers") == 0)
+    }
+
+    // MARK: - Rewards answers
+
+    /// The account figures come with the first cycle, and the proposals the
+    /// moment their query answers, not with the next cycle up to an interval
+    /// later. The cycle's own update is published again for them, so nothing
+    /// else in it moves and nothing is fetched again.
+    @Test("a rewards answer is shown as soon as it arrives")
+    func rewardsAnswerShownAtOnce() async throws {
+        let stub = StubFetcher()
+        let clock = TestClock()
+        standardRoutes(stub, seed: nonMatchingSeed)
+        let nowSeconds = Int64(clock.now.timeIntervalSince1970)
+        stub.route(
+            "/v2/block-headers",
+            json: JSONBuilder.blockHeaders(
+                [(round: 64_030_000, timestamp: nowSeconds - 3_600, payout: 8_000_000)],
+                proposer: Self.addressString))
+        let poller = makePoller(stub: stub, clock: clock, withIndexer: true)
+
+        let updates = await published(by: poller) {
+            await poller.refresh()
+            await poller.rewardsSettled()
+        }
+
+        try #require(updates.count == 2)
+        let (cycle, answered) = (updates[0], updates[1])
+        #expect(cycle.only?.rewards == nil)
+        #expect(answered.only?.rewards?.proposals24h == 1)
+        #expect(answered.observedAt == cycle.observedAt)
+        #expect(answered.currentRound == cycle.currentRound)
+        #expect(answered.roundTime == cycle.roundTime)
+        #expect(stub.requestCount(containing: "/v2/accounts/") == 1)
+    }
+
+    /// No alert rule reads rewards, so their answer changes no alert, and what
+    /// the cycle notified is not notified a second time.
+    @Test("a rewards answer notifies nothing and leaves the alerts as they were")
+    func rewardsAnswerNotifiesNothing() async throws {
+        let stub = StubFetcher()
+        let clock = TestClock()
+        standardRoutes(stub, round: 64_030_160, seed: matchingSeed, lastSeen: 64_029_500)
+        stub.route("/v2/block-headers", json: "{\"blocks\":[]}")
+        let poller = makePoller(stub: stub, clock: clock, withIndexer: true)
+
+        let updates = await published(by: poller) {
+            await poller.refresh()
+            await poller.rewardsSettled()
+        }
+
+        try #require(updates.count == 2)
+        let (cycle, answered) = (updates[0], updates[1])
+        #expect(cycle.notifications.contains { $0.id == .challengeFailing })
+        #expect(answered.notifications.isEmpty)
+        #expect(answered.alerts == cycle.alerts)
+        #expect(answered.alertHistory == cycle.alertHistory)
+        #expect(answered.only?.rewards?.proposals7d == 0)
+    }
+
+    @Test("a failed rewards query is shown as soon as it fails")
+    func rewardsFailureShownAtOnce() async throws {
+        let stub = StubFetcher()
+        let clock = TestClock()
+        standardRoutes(stub, seed: nonMatchingSeed)
+        stub.route("/v2/block-headers", status: 503, json: "{}")
+        let poller = makePoller(stub: stub, clock: clock, withIndexer: true)
+
+        let updates = await published(by: poller) {
+            await poller.refresh()
+            await poller.rewardsSettled()
+        }
+
+        try #require(updates.count == 2)
+        let (cycle, answered) = (updates[0], updates[1])
+        #expect(cycle.failure == nil)
+        #expect(answered.only?.rewards == nil)
+        #expect(answered.only?.failure?.stage == .rewards)
+        #expect(answered.failure?.stage == .rewards)
+    }
+
+    /// An account whose fetch fails is shown as it last was, and the rewards
+    /// shown since its cycle are part of that.
+    @Test("a failed fetch after a rewards answer carries that answer")
+    func staleEntryCarriesRewardsAnswer() async throws {
+        let stub = StubFetcher()
+        let clock = TestClock()
+        let second = Self.filledAddress(0x11)
+        accountRoute(stub, address)
+        accountRoute(stub, second)
+        sharedRoutes(stub)
+        let nowSeconds = Int64(clock.now.timeIntervalSince1970)
+        stub.route(
+            "/v2/block-headers",
+            json: JSONBuilder.blockHeaders(
+                [(round: 64_029_000, timestamp: nowSeconds - 3_600, payout: 8_000_000)],
+                proposer: Self.addressString))
+        let poller = makePoller(
+            stub: stub, clock: clock, addresses: [address, second], withIndexer: true)
+
+        let updates = await published(by: poller) {
+            await poller.refresh()
+            await poller.rewardsSettled()
+            stub.route("/v2/accounts/\(Self.addressString)", status: 503, json: "{}")
+            clock.advance(30)
+            await poller.refresh()
+        }
+
+        let held = try #require(updates.last?.entry(for: address))
+        #expect(held.isStale)
+        #expect(held.rewards?.proposals24h == 1)
     }
 
     // MARK: - Round timing

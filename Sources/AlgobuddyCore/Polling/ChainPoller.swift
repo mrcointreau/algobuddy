@@ -306,7 +306,7 @@ public actor ChainPoller {
     /// A rewards fetch it starts answers after it: in the published update
     /// again, or in the next one; see `rewardsSettled()`.
     @discardableResult
-    public func pollOnce() async -> Update {
+    func pollOnce() async -> Update {
         let now = dates.now
         let addresses = config.addresses
 
@@ -387,21 +387,24 @@ public actor ChainPoller {
 
         switch await seedFetch {
         case .success(let header):
-            if let seed = header.seed {
+            // Only the header of the round asked for, since another block's
+            // seed selects other accounts than the challenge does. A header
+            // that omits its round cannot be checked, and is taken as the one
+            // asked for.
+            let isAsked = header.round.map { $0 == seedRound } ?? true
+            if let seed = header.seed, isAsked {
                 challengeSeed = seed
                 challengeSeedRound = seedRound
             } else {
-                // A 200 with no seed must not stamp the window as fetched:
-                // that would silently disable challenge monitoring for the
-                // next ~1000 rounds. Leaving the round unstamped retries on
-                // the next poll, and the failure says why the row is gone.
-                failure =
-                    failure
-                    ?? PollFailure(
-                        stage: .challengeSeed,
-                        message:
-                            "The chain data source returned a block header without a seed, so challenge monitoring is paused."
-                    )
+                // Neither case may stamp the window as fetched: that would
+                // silently disable challenge monitoring for the next ~1000
+                // rounds. Leaving the round unstamped retries on the next
+                // poll, and the failure says why the row is gone.
+                let message =
+                    isAsked
+                    ? "The chain data source returned a block header without a seed, so challenge monitoring is paused."
+                    : "The chain data source returned a block other than the challenge block, so challenge monitoring is paused."
+                failure = failure ?? PollFailure(stage: .challengeSeed, message: message)
             }
         case .failure(let error):
             failure = failure ?? pollFailure(error, at: .challengeSeed)
@@ -728,15 +731,10 @@ public actor ChainPoller {
     }
 
     /// Severity first, and within a severity the order the accounts are watched
-    /// in. Swift's sort is not stable, so without the second key equally severe
-    /// alerts could swap places between polls and read as something changing.
+    /// in, which Swift's stable sort keeps, so equally severe alerts never
+    /// swap places between polls and read as something changing.
     private func ordered(_ alerts: [HealthAlert]) -> [HealthAlert] {
-        alerts.enumerated()
-            .sorted {
-                $0.element.severity == $1.element.severity
-                    ? $0.offset < $1.offset : $0.element.severity > $1.element.severity
-            }
-            .map(\.element)
+        alerts.sorted { $0.severity > $1.severity }
     }
 
     /// The dispatcher is consulted only when notifications will actually be

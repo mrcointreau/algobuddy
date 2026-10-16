@@ -9,14 +9,16 @@ public struct BlockHeaderResponse: Decodable, Sendable {
 /// The JSON uses the block's msgpack short keys rather than the friendly names
 /// found elsewhere in the API, and there is no generated schema for them. Only
 /// what the poller reads is decoded: the seed, which derives the heartbeat
-/// challenge, and the round and timestamp, which time the round clock against
-/// a block in the past. Proposal history comes from the indexer's own
-/// block-header shape instead.
+/// challenge, the round, which shows a header is the one asked for, and the
+/// timestamp, which with the round times the round clock against a block in
+/// the past. Proposal history comes from the indexer's own block-header shape
+/// instead.
 ///
 /// Every field is optional because it can be absent from a proxied or trimmed
 /// response. A missing seed must surface as a poll failure rather than fail the
-/// decode of an otherwise valid header, and a missing round or timestamp only
-/// leaves the round clock to time itself.
+/// decode of an otherwise valid header. A missing round cannot be checked, so
+/// the seed is taken without it, while the round clock, as without a
+/// timestamp, is left to time itself.
 public struct BlockHeader: Decodable, Sendable, Equatable {
     public let seed: Data?
     public let round: UInt64?

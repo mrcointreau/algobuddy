@@ -83,10 +83,6 @@ public enum SHA512_256 {
         return digest
     }
 
-    public static func hash(_ data: Data) -> Data {
-        Data(hash([UInt8](data)))
-    }
-
     private static func rotr(_ x: UInt64, _ n: UInt64) -> UInt64 {
         (x >> n) | (x << (64 - n))
     }

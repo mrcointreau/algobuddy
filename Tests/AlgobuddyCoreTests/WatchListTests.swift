@@ -23,8 +23,8 @@ struct WatchListTests {
 
     // MARK: - Reading a stored list
 
-    /// The watch a user already has must survive an update to a version that
-    /// keeps a list, with nothing lost and nothing asked of them.
+    /// A lone stored address names exactly one watched account, so it reads
+    /// back as that account alone, with nothing lost and nothing asked.
     @Test("a lone stored address reads back as a one-element list")
     func singleBecomesList() {
         #expect(WatchList.restore(list: nil, single: Self.first) == [Self.first])
@@ -116,5 +116,21 @@ struct WatchListTests {
     func noRows() {
         #expect(WatchList.resolve([]).isEmpty)
         #expect(WatchList.resolve(rows([""])).isEmpty)
+    }
+
+    /// Settings marks the rows that resolving drops as repeats, so the two
+    /// agree even when the first row names its account only by what it holds.
+    @Test("the repeats are the rows that resolving drops")
+    func repeatsAreTheDroppedRows() throws {
+        let held = try AlgorandAddress(Self.first)
+        let rows = [
+            WatchList.Row(text: Self.typo, held: held),
+            WatchList.Row(text: Self.second),
+            WatchList.Row(text: " " + Self.first.lowercased()),
+            WatchList.Row(text: Self.typo),
+            WatchList.Row(text: Self.second),
+        ]
+        #expect(WatchList.repeats(rows) == [2, 4])
+        #expect(WatchList.resolve(rows).map(\.stringValue) == [Self.first, Self.second])
     }
 }

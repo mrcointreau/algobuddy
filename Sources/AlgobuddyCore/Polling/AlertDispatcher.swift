@@ -19,17 +19,13 @@ public struct AlertDispatcher: Sendable, Equatable {
     /// what the user was told rather than against the previous poll, so a
     /// severity that wobbles across a threshold announces the rise once.
     private var lastSeverity: [AlertKey: AlertSeverity] = [:]
-    /// The alerts that held when their account was last evaluated.
-    private var holding: Set<AlertKey> = []
-    /// When each alert that held, or that a restored notification vouches for,
-    /// was first found gone. Together with `holding`, this is what tells a
-    /// condition that continues from one that cleared and came back.
+    /// When each notified alert was first found gone, which is what tells a
+    /// condition that continues from one that cleared and came back. An alert
+    /// is found gone only when its account is evaluated without it, so a
+    /// notified alert with no entry here has held since: at its account's
+    /// latest evaluation or, for a notification restored from an earlier run,
+    /// since the user was told.
     private var absentSince: [AlertKey: Date] = [:]
-    /// The accounts evaluated since this dispatcher was created, nil standing
-    /// for the watch itself. Until an account has been, its restored
-    /// notifications count as still holding.
-    private var everEvaluated: Set<AlgorandAddress?> = []
-    private var evaluatedEverything = false
 
     /// - Parameters:
     ///   - lastNotified: Notification times persisted from an earlier run.
@@ -85,10 +81,12 @@ public struct AlertDispatcher: Sendable, Equatable {
     ///   standing for the watch itself. An alert of an account that was not
     ///   evaluated, because its fetch failed, has not cleared. An alert for such
     ///   an account, such as one saying its data is unavailable, is dispatched
-    ///   like any other but clears nothing. Nil means every account was
-    ///   evaluated.
+    ///   like any other but clears nothing. No default is safe, so there is
+    ///   none: taking every account as evaluated would clear the alerts of a
+    ///   failed fetch, and taking the watch alone would never clear an
+    ///   account's.
     public mutating func dispatch(
-        _ alerts: [HealthAlert], evaluated: Set<AlgorandAddress?>? = nil, now: Date
+        _ alerts: [HealthAlert], evaluated: Set<AlgorandAddress?>, now: Date
     ) -> [HealthAlert] {
         var notify = [HealthAlert]()
 
@@ -119,32 +117,21 @@ public struct AlertDispatcher: Sendable, Equatable {
     /// restored from an earlier run means the user has been told, and the
     /// condition is taken to have held since.
     private func continues(_ key: AlertKey, now: Date) -> Bool {
-        guard evaluatedEverything || everEvaluated.contains(key.address) else { return true }
-        if holding.contains(key) { return true }
-        guard let since = absentSince[key] else { return false }
+        guard let since = absentSince[key] else { return true }
         return now.timeIntervalSince(since) < cooldown
     }
 
     private mutating func record(
-        _ alerts: [HealthAlert], evaluated: Set<AlgorandAddress?>?, now: Date
+        _ alerts: [HealthAlert], evaluated: Set<AlgorandAddress?>, now: Date
     ) {
         let present = Set(alerts.map(\.key))
         // Only the evaluated accounts can have cleared. A failed fetch evaluates
         // nothing for its account, and a sleeping Mac makes no call at all, so
         // whatever held before still holds.
-        let covered: (AlertKey) -> Bool
-        if let evaluated {
-            covered = { evaluated.contains($0.address) }
-            everEvaluated.formUnion(evaluated)
-        } else {
-            covered = { _ in true }
-            evaluatedEverything = true
+        let gone = lastNotified.keys.filter {
+            evaluated.contains($0.address) && !present.contains($0)
         }
-
-        for key in holding.union(lastNotified.keys) where covered(key) && !present.contains(key) {
-            absentSince[key] = absentSince[key] ?? now
-        }
+        for key in gone { absentSince[key] = absentSince[key] ?? now }
         for key in present { absentSince[key] = nil }
-        holding = holding.filter { !covered($0) }.union(present)
     }
 }

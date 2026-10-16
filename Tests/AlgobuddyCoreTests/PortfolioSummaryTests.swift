@@ -90,9 +90,6 @@ struct PortfolioSummaryTests {
         #expect(summary.closestKeyExpiry == 1_500)  // 500 rounds at 3 s
     }
 
-    /// An account already past its limit is the one thing the portfolio most
-    /// needs to say, so a negative headroom must win rather than be discarded
-    /// for being smaller than nothing.
     /// The menu bar's key countdown follows the alerts, which say nothing about
     /// the keys of an account that is not Online. A suspended account's lapsed
     /// keys would otherwise read "overdue" while the Online one has months left.
@@ -115,6 +112,9 @@ struct PortfolioSummaryTests {
         #expect(alone.closestKeyExpiry == nil)
     }
 
+    /// An account already past its limit is the one thing the portfolio most
+    /// needs to say, so a negative headroom must win rather than be discarded
+    /// for being smaller than nothing.
     @Test("a headroom already past zero still wins")
     func negativeHeadroomWins() {
         let summary = PortfolioSummary(

@@ -114,6 +114,20 @@ public enum AlgodError: Error, Equatable, Sendable {
     case redirectRefused
 }
 
+extension AlgodError {
+    /// The error a status other than 200 stands for, nil for 200. Shared by
+    /// algod and the indexer, so the message for each stage can say what a 401
+    /// or a 404 means there.
+    init?(status: Int, path: String) {
+        switch status {
+        case 200: return nil
+        case 401: self = .unauthorized(path: path)
+        case 404: self = .notFound(path: path)
+        default: self = .http(status: status, path: path)
+        }
+    }
+}
+
 /// Client for the three algod endpoints algobuddy reads.
 ///
 /// The token is optional and, against a public API provider, unnecessary, since
@@ -163,12 +177,7 @@ public struct AlgodClient: Sendable {
         timeout: TimeInterval = 15
     ) async throws -> T {
         let (data, code) = try await fetcher.get(url(path), headers: headers(), timeout: timeout)
-        switch code {
-        case 200: break
-        case 401: throw AlgodError.unauthorized(path: path)
-        case 404: throw AlgodError.notFound(path: path)
-        default: throw AlgodError.http(status: code, path: path)
-        }
+        if let error = AlgodError(status: code, path: path) { throw error }
         do {
             return try JSONDecoder().decode(type, from: data)
         } catch {
@@ -234,7 +243,7 @@ public struct IndexerClient: Sendable {
         }
         let (data, code) = try await fetcher.get(
             Endpoint.resolve(path, against: baseURL), headers: [:], timeout: 20)
-        guard code == 200 else { throw AlgodError.http(status: code, path: path) }
+        if let error = AlgodError(status: code, path: path) { throw error }
         do {
             return try JSONDecoder().decode(BlockHeadersPage.self, from: data)
         } catch {

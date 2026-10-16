@@ -78,8 +78,9 @@ final class AppModel {
     /// How many accounts the panel is about: the displayed data's, or, before
     /// any has arrived, how many are being watched. The panel becomes a list of
     /// accounts only past one, and the menu bar and notifications name accounts
-    /// only past one, so this is the switch for all of them: with a single
-    /// account every surface reads as it always has.
+    /// only past one, so this is the switch for all of them: a single account
+    /// has every surface to itself, so the menu bar and notifications need not
+    /// say which account they mean.
     ///
     /// The watched count stands in until data arrives, deliberately: a
     /// portfolio whose first poll is still in flight must not head its panel
@@ -91,7 +92,7 @@ final class AppModel {
     /// account has, where repeating the same sentence per address would say
     /// nothing more. One account's own trouble is its own line instead, beside
     /// its own facts. With a single account watched, its failure is by
-    /// definition every account's, so this reads exactly as it always has.
+    /// definition every account's, so the panel states it once.
     var sharedFailure: PollFailure? {
         guard let update, let failure = update.failure else { return nil }
         guard failure.stage.isShared || update.entries.allSatisfy({ $0.failure != nil })
@@ -176,6 +177,7 @@ final class AppModel {
         static let indexerURL = "https://mainnet-idx.algonode.cloud"
     }
 
+    private let addressesKey = "addresses"
     /// Where a store can hold a single watched address instead of the list.
     /// Read on load and cleared on the first save, so the watch it names
     /// carries over exactly once and the address does not outlive the list.
@@ -239,9 +241,14 @@ final class AppModel {
         return segments.isEmpty ? nil : segments.joined(separator: MenuBar.separator)
     }
 
-    /// The menu bar text as it stands, figures or stand-ins, for the width
-    /// readout in Settings.
-    var menuBarWidthSample: String { menuBarSegments.joined(separator: MenuBar.separator) }
+    /// The menu bar's figures without the stand-ins, for VoiceOver, which
+    /// would read a stand-in out dash by dash.
+    var menuBarFigures: String? {
+        let figures = MenuBarMetric.allCases.filter(metrics.contains).compactMap {
+            menuBarFigure($0)
+        }
+        return figures.isEmpty ? nil : figures.joined(separator: MenuBar.separator)
+    }
 
     /// A metric's figure from the data on display, or nil while it has none.
     private func menuBarFigure(_ metric: MenuBarMetric) -> String? {
@@ -345,23 +352,25 @@ final class AppModel {
             .contains { $0.standardizedFileURL == parent }
     }()
 
-    private var loginStatusQueryInFlight = false
+    /// Counts the status queries, so that only the latest one's answer lands.
+    private var loginStatusQueries = 0
 
     /// Off the launch path deliberately: `status` is a synchronous XPC round
     /// trip to the background-task daemon, and the value is only ever shown in
     /// Settings, so App.init must not wait on it before the menu bar appears.
-    /// Coalesced, so repeated calls cannot pile up queries whose out-of-order
-    /// completions would land a stale status last.
+    /// The latest query wins, so an answer from before a toggle, or from before
+    /// an approval in System Settings, cannot land last.
     func refreshLoginItemStatus() {
-        guard canLaunchAtLogin, !loginStatusQueryInFlight else { return }
-        loginStatusQueryInFlight = true
+        guard canLaunchAtLogin else { return }
+        loginStatusQueries += 1
+        let query = loginStatusQueries
         // The task inherits main-actor isolation, so every touch of `self`
         // stays on the main actor and nothing is sent across an isolation
         // boundary; only the nonisolated query below hops off to do the XPC.
         Task { [weak self] in
             let status = await Self.queryLoginItemStatus()
-            self?.loginItemStatus = status
-            self?.loginStatusQueryInFlight = false
+            guard let self, query == self.loginStatusQueries else { return }
+            self.loginItemStatus = status
         }
     }
 
@@ -464,7 +473,7 @@ final class AppModel {
         // watched account, and comes through as that account with nothing asked
         // of the user. See `WatchList.restore(list:single:)`.
         let stored = WatchList.restore(
-            list: defaults.array(forKey: "addresses") as? [String],
+            list: defaults.array(forKey: addressesKey) as? [String],
             single: defaults.string(forKey: singleAddressKey))
         let names = AccountNames(
             stored: (defaults.dictionary(forKey: accountNamesKey) ?? [:])
@@ -502,13 +511,17 @@ final class AppModel {
         // the follow-up would be swallowed too.
         if canNotify {
             UNUserNotificationCenter.current().delegate = notificationPresenter
-            // The permission can change in System Settings while the app runs,
-            // and coming back to the panel or to Settings activates the app,
-            // so that is where a change is read straight away.
-            activationObserver = NotificationCenter.default.addObserver(
-                forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main
-            ) { [weak self] _ in
-                MainActor.assumeIsolated { self?.refreshNotificationAuthorization() }
+        }
+        // The permission and the login item can change in System Settings while
+        // the app runs, and coming back to the panel or to Settings activates
+        // the app, so that is where a change is read straight away. Each
+        // refresh does nothing where it does not apply.
+        activationObserver = NotificationCenter.default.addObserver(
+            forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.refreshNotificationAuthorization()
+                self?.refreshLoginItemStatus()
             }
         }
         // Read before the first poll can dispatch, which it almost always
@@ -555,7 +568,7 @@ final class AppModel {
         guard !addresses.isEmpty else {
             // Deliberate clearing is persisted; a stored address must not
             // resurrect at the next launch after the user removed it.
-            UserDefaults.standard.set([String](), forKey: "addresses")
+            UserDefaults.standard.set([String](), forKey: addressesKey)
             UserDefaults.standard.removeObject(forKey: singleAddressKey)
             stopWatching()
             sourceError = nil
@@ -600,7 +613,7 @@ final class AppModel {
         // exactly what is running. Canonical, so a pasted address stored in
         // another case cannot read back as a different account.
         let defaults = UserDefaults.standard
-        defaults.set(watched, forKey: "addresses")
+        defaults.set(watched, forKey: addressesKey)
         // The list is the whole of what is watched, so a lone stored address is
         // cleared as it is taken up into it. Left behind, it would outlive the
         // moment the user takes that account off the list.
@@ -673,12 +686,16 @@ final class AppModel {
         // to be watched, the reason is self-evident. macOS answers from the
         // stored decision after the first time, so reaching this again on a
         // configured launch shows nothing.
-        if notificationsEnabled { requestNotificationAuthorisation() }
+        if notificationsEnabled { requestNotificationAuthorization() }
     }
 
     func stop() {
         streamTask?.cancel()
         streamTask = nil
+        // The Refresh button must not stay busy for a poller that is gone.
+        refreshTask?.cancel()
+        refreshTask = nil
+        isRefreshing = false
         if let poller {
             Task { await poller.stop() }
         }
@@ -707,7 +724,7 @@ final class AppModel {
     func setNotifications(enabled: Bool) {
         notificationsEnabled = enabled
         save()
-        if enabled { requestNotificationAuthorisation() }
+        if enabled { requestNotificationAuthorization() }
         // Synchronous through the poller's gate: effective before this call
         // returns, so no in-flight poll can stamp a cooldown for a
         // notification that will never be shown.
@@ -715,12 +732,17 @@ final class AppModel {
     }
 
     private(set) var isRefreshing = false
+    private var refreshTask: Task<Void, Never>?
 
     func refreshNow() {
         guard let poller, !isRefreshing else { return }
         isRefreshing = true
-        Task {
+        refreshTask = Task {
             await poller.refresh()
+            // Cancelled by `stop()`, which cleared the flag. It may since
+            // belong to a refresh of the next poller, which this one's end
+            // must not cut short.
+            guard !Task.isCancelled else { return }
             isRefreshing = false
         }
     }
@@ -744,12 +766,20 @@ final class AppModel {
             } else {
                 log.info("rewards answered")
             }
-        } else if let failure = value.failure {
+        } else if !value.hasData {
             failureCount += 1
-            log.error("poll failed at \(failure.stage.rawValue): \(failure.message)")
+            let failure = value.failure
+            log.error(
+                "poll failed at \(failure?.stage.rawValue ?? "unknown"): \(failure?.message ?? "no account data")"
+            )
         } else {
+            // A cycle that fetched account data is a poll, whatever else of it
+            // failed: the heartbeat is the record of whether the watch works.
             pollCount += 1
             log.info("poll ok round=\(value.currentRound ?? 0) alerts=\(value.alerts.count)")
+            if let failure = value.failure {
+                log.info("poll partial at \(failure.stage.rawValue): \(failure.message)")
+            }
         }
         emitHeartbeatIfDue()
         guard notificationsEnabled else { return }
@@ -956,7 +986,7 @@ final class AppModel {
 
     /// The gate opens once the answer is read back, so nothing is dispatched
     /// while the prompt is still on screen.
-    private func requestNotificationAuthorisation() {
+    private func requestNotificationAuthorization() {
         guard canNotify else { return }
         Task { [weak self] in
             await Self.askForNotificationPermission()

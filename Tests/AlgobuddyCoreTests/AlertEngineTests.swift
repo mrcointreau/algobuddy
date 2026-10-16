@@ -76,6 +76,7 @@ struct AlertEngineTests {
             Snapshot(challenge: challenge(remaining: -300))
         ).first { $0.id == .challengeFailing }
         #expect(alert?.severity == .critical)
+        #expect(alert?.title == "Challenge expired")
         #expect(alert?.body.contains("suspended") == true)
     }
 
@@ -107,16 +108,20 @@ struct AlertEngineTests {
                 headroomRounds: Int64(252_022.0 * (1 - ratio)),
                 ratio: ratio, isAbsent: absent)
         }
+        func headroomAlert(_ assessment: AbsenceAssessment) -> HealthAlert? {
+            engine.evaluate(Snapshot(absence: assessment)).first { $0.id == .absenceHeadroom }
+        }
         #expect(engine.evaluate(Snapshot(absence: assessment(ratio: 0.1))).isEmpty)
-        #expect(
-            engine.evaluate(Snapshot(absence: assessment(ratio: 0.6)))
-                .first { $0.id == .absenceHeadroom }?.severity == .warning)
-        #expect(
-            engine.evaluate(Snapshot(absence: assessment(ratio: 0.9)))
-                .first { $0.id == .absenceHeadroom }?.severity == .critical)
-        #expect(
-            engine.evaluate(Snapshot(absence: assessment(ratio: 1.2, absent: true)))
-                .first { $0.id == .absenceHeadroom }?.severity == .critical)
+        let low = headroomAlert(assessment(ratio: 0.6))
+        #expect(low?.severity == .warning)
+        #expect(low?.title == "Absence headroom low")
+        // Both critical, so only the title tells a limit near from one passed.
+        let near = headroomAlert(assessment(ratio: 0.9))
+        #expect(near?.severity == .critical)
+        #expect(near?.title == "Absence limit near")
+        let passed = headroomAlert(assessment(ratio: 1.2, absent: true))
+        #expect(passed?.severity == .critical)
+        #expect(passed?.title == "Absence limit passed")
     }
 
     // MARK: - Key expiry

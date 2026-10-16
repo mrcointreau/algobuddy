@@ -221,12 +221,11 @@ enum JSONBuilder {
     }
 
     static func blockHeader(
-        round: UInt64, seed: Data?, timestamp: Int64 = 1_786_565_360
+        round: UInt64?, seed: Data?, timestamp: Int64 = 1_786_565_360
     ) -> String {
-        var fields = [
-            "\"rnd\":\(round)",
-            "\"ts\":\(timestamp)",
-        ]
+        var fields = [String]()
+        if let round { fields.append("\"rnd\":\(round)") }
+        fields.append("\"ts\":\(timestamp)")
         if let seed { fields.append("\"seed\":\"\(seed.base64EncodedString())\"") }
         return "{\"block\":{\(fields.joined(separator: ","))}}"
     }

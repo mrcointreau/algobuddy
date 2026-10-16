@@ -80,6 +80,21 @@ struct RoundClockTests {
         #expect(abs(clock.estimate - blended) < 1e-9)
     }
 
+    /// A backend behind a load balancer can answer with the same round again,
+    /// or with an older one. Neither is a start: round 1,000 was already
+    /// reached when it was first seen, so the next sample spans all 30 s.
+    @Test("a round that does not advance keeps the sample's start")
+    func stalledRoundKeepsStart() {
+        var clock = RoundClock()
+        clock.observe(round: 1_000, at: start)
+        clock.observe(round: 1_000, at: start.addingTimeInterval(2))
+        clock.observe(round: 995, at: start.addingTimeInterval(15))
+        clock.observe(round: 1_011, at: start.addingTimeInterval(30))
+        #expect(clock.sampleCount == 1)
+        let blended = RoundClock.nominal + 0.2 * (30.0 / 11 - RoundClock.nominal)
+        #expect(abs(clock.estimate - blended) < 1e-9)
+    }
+
     @Test("an anchor gives the rate over a long span from the first observation")
     func anchorGivesLongSpan() {
         var clock = RoundClock()
@@ -116,6 +131,14 @@ struct RoundClockTests {
             if elapsed >= 75 * 60 { worst = max(worst, abs(clock.estimate - 2.8)) }
         }
         #expect(worst < 0.003)
+    }
+}
+
+extension AlertDispatcher {
+    /// A dispatch that evaluates the watch alone, which is all the alerts of
+    /// `AlertDispatcherTests.alert` belong to, since they name no account.
+    fileprivate mutating func dispatch(_ alerts: [HealthAlert], now: Date) -> [HealthAlert] {
+        dispatch(alerts, evaluated: [nil], now: now)
     }
 }
 
@@ -445,8 +468,8 @@ struct RewardsTrackerTests {
         #expect(tracker.summary(now: now).earned24h == MicroAlgos(16_000_000))
     }
 
-    /// Otherwise "in window" would quietly accumulate history from wider
-    /// earlier fetches and stop meaning what its name says.
+    /// The cache holds the window being fetched, rather than every block seen
+    /// since launch.
     @Test("advancing the window drops rounds that fall outside it")
     func pruning() {
         var tracker = RewardsTracker()
@@ -459,7 +482,7 @@ struct RewardsTrackerTests {
 
         tracker.ingest([], windowStartRound: 400)
         #expect(tracker.count == 1)
-        #expect(tracker.windowStartRound == 400)
+        #expect(tracker.highestRound == 500)
     }
 
     /// The newest cached round is what lets the poller resume an incremental

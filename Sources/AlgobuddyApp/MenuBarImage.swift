@@ -26,10 +26,15 @@ enum MenuBarImage {
     /// baseline.
     private static let baselineLift: CGFloat = 0.5
 
-    static func render(symbol name: String, text: String?) -> NSImage {
-        let symbol = NSImage(systemSymbolName: name, accessibilityDescription: nil) ?? NSImage()
+    /// - Parameter description: What VoiceOver calls the item. The status item
+    ///   takes its name from its image's description, so the image carries it.
+    static func render(symbol name: String, text: String?, description: String) -> NSImage {
         // Alone, the symbol is what the status item would show anyway.
-        guard let text else { return symbol }
+        guard let text else {
+            return NSImage(systemSymbolName: name, accessibilityDescription: description)
+                ?? NSImage()
+        }
+        let symbol = NSImage(systemSymbolName: name, accessibilityDescription: nil) ?? NSImage()
 
         let font = Self.font
         let lines = text.components(separatedBy: MenuBar.algo).map { run in
@@ -71,6 +76,7 @@ enum MenuBarImage {
             return true
         }
         image.isTemplate = true
+        image.accessibilityDescription = description
         return image
     }
 }

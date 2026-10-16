@@ -37,16 +37,16 @@ struct PanelView: View {
             })
     }
 
-    /// One account is today's single page. Past one, the panel is a list of
-    /// the accounts, and each opens its own page, which is the single page
-    /// with a way back.
+    /// One account has the panel to itself, on a single page. Past one, the
+    /// panel is a list of the accounts, and each opens its own page, which is
+    /// that single page with a way back.
     @ViewBuilder
     private var content: some View {
         if let update = model.display, update.hasData {
             if update.entries.count == 1, let entry = update.entries.first {
-                // The applied address: a half-typed Settings draft must not head
-                // another account's figures.
-                header { AddressTitle(address: model.watchedAddress) }
+                // The entry's own address, so the title names the account whose
+                // figures follow, whatever is being typed in Settings meanwhile.
+                header { AddressTitle(address: entry.address.stringValue) }
                 Divider()
                 single(update, entry)
             } else if let entry = selectedEntry(in: update) {

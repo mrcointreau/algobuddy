@@ -3,7 +3,7 @@ import Foundation
 /// A quantity of microAlgos. Algorand amounts are always integral µALGO on the
 /// wire; keeping them as `UInt64` avoids the rounding that creeps in when
 /// balances are stored as `Double`.
-public struct MicroAlgos: Hashable, Sendable, Codable, Comparable {
+public struct MicroAlgos: Hashable, Sendable, Decodable, Comparable {
     public let raw: UInt64
 
     public init(_ raw: UInt64) { self.raw = raw }
@@ -18,11 +18,6 @@ public struct MicroAlgos: Hashable, Sendable, Codable, Comparable {
 
     public init(from decoder: Decoder) throws {
         raw = try decoder.singleValueContainer().decode(UInt64.self)
-    }
-
-    public func encode(to encoder: Encoder) throws {
-        var container = encoder.singleValueContainer()
-        try container.encode(raw)
     }
 }
 

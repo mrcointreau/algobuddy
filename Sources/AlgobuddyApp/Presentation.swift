@@ -260,6 +260,17 @@ enum Format {
         hidden ? "\(Self.hidden()) ALGO" : "\(algos(amount, decimals: decimals)) ALGO"
     }
 
+    /// An amount where a row has little room for it: in millions from ten
+    /// million on, so no row's amount is wider than `widestRowAmount`. The
+    /// account's own page shows it in full.
+    static func rowAlgosLabel(_ amount: MicroAlgos, hidden: Bool) -> String {
+        guard !hidden, amount.algos >= 10_000_000 else { return algosLabel(amount, hidden: hidden) }
+        return String(format: "%.2fM ALGO", amount.algos / 1_000_000)
+    }
+
+    /// The widest amount `rowAlgosLabel` gives, in digits of one width.
+    static let widestRowAmount = "0000000.00 ALGO"
+
     /// A shortened address, or its mask, on the same terms as `algosLabel`.
     /// Every surface that shows an address goes through here, by itself or
     /// through `accountLabel`, so a new one cannot show a real address while

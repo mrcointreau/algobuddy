@@ -85,7 +85,9 @@ struct PanelView: View {
         VStack(alignment: .leading, spacing: Spacing.group) {
             // The only account's failure is every account's, so the line
             // beneath the cards states it once, rather than this section as well.
-            AccountSection(update: update, entry: entry, statesOwnFailure: false)
+            AccountSection(
+                update: update, entry: entry, statesOwnFailure: false,
+                expectsRewards: model.expectsRewards)
             // visibleAlerts, not this update's own list: during an outage
             // the displayed data is the last good poll, and the outage
             // alert colouring the menu bar icon lives on the latest failed
@@ -103,7 +105,9 @@ struct PanelView: View {
         // account too.
         let alerts = model.visibleAlerts.about(entry.address, includingWatchAlerts: true)
         return VStack(alignment: .leading, spacing: Spacing.group) {
-            AccountSection(update: update, entry: entry, statesOwnFailure: true)
+            AccountSection(
+                update: update, entry: entry, statesOwnFailure: true,
+                expectsRewards: model.expectsRewards)
             if !alerts.isEmpty {
                 AlertsCard(alerts: alerts, namesAccounts: false)
             }
@@ -127,7 +131,7 @@ struct PanelView: View {
                     AlertsCard(
                         alerts: model.visibleAlerts, namesAccounts: true, open: { show($0) })
                 }
-                PortfolioCard(summary: update.portfolio)
+                PortfolioCard(summary: update.portfolio, expectsRewards: model.expectsRewards)
                 AccountsCard(update: update, alerts: model.visibleAlerts, open: { show($0) })
                 sharedFailureLine
             }
@@ -468,6 +472,9 @@ struct MenuRowLabel: View {
 /// is a plain fact: what any of them means is the Attention section's to say.
 struct PortfolioCard: View {
     let summary: PortfolioSummary
+    /// Whether proposal figures are on their way, so their rows keep their
+    /// place until the first answer and the card does not grow when it comes.
+    let expectsRewards: Bool
     @Environment(\.valuesHidden) private var isHidden
 
     var body: some View {
@@ -487,6 +494,8 @@ struct PortfolioCard: View {
                     ProposalsGrid(
                         proposals24h: summary.proposals24h, earned24h: summary.earned24h,
                         proposals7d: summary.proposals7d, earned7d: summary.earned7d)
+                } else if expectsRewards {
+                    ProposalsGrid()
                 }
                 if summary.isTruncated {
                     TruncationNote()
@@ -522,6 +531,10 @@ struct AccountSection: View {
     /// account page, which states its only account's failure once beneath
     /// everything.
     let statesOwnFailure: Bool
+    /// Whether proposal figures are on their way. They answer seconds after
+    /// the account, so their card keeps its place meanwhile and the panel
+    /// does not grow when they come.
+    let expectsRewards: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.group) {
@@ -529,6 +542,8 @@ struct AccountSection: View {
                 AccountCard(update: update, entry: entry, account: account)
                 if let rewards = entry.rewards {
                     RewardsCard(rewards: rewards)
+                } else if expectsRewards, !entry.isStale {
+                    RewardsCard(rewards: nil)
                 }
             }
             if statesOwnFailure, let failure = entry.failure {
@@ -613,7 +628,8 @@ struct AccountCard: View {
 }
 
 struct RewardsCard: View {
-    let rewards: RewardsSummary
+    /// Nil while the proposals are on their way.
+    let rewards: RewardsSummary?
 
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.heading) {
@@ -621,14 +637,14 @@ struct RewardsCard: View {
                 .accessibilityAddTraits(.isHeader)
 
             ProposalsGrid(
-                proposals24h: rewards.proposals24h, earned24h: rewards.earned24h,
-                proposals7d: rewards.proposals7d, earned7d: rewards.earned7d)
+                proposals24h: rewards?.proposals24h, earned24h: rewards?.earned24h,
+                proposals7d: rewards?.proposals7d, earned7d: rewards?.earned7d)
 
-            if rewards.unpaidProposals > 0 {
+            if let rewards, rewards.unpaidProposals > 0 {
                 Text("\(quantity(Double(rewards.unpaidProposals), "proposal")) earned nothing")
                     .font(Typography.secondary).foregroundStyle(.orange)
             }
-            if rewards.isTruncated {
+            if rewards?.isTruncated == true {
                 TruncationNote()
             }
         }
@@ -642,10 +658,12 @@ struct RewardsCard: View {
 /// scan." Shared by one account's card and the portfolio summary, so the same
 /// two figures cannot be laid out or masked two different ways.
 struct ProposalsGrid: View {
-    let proposals24h: Int
-    let earned24h: MicroAlgos
-    let proposals7d: Int
-    let earned7d: MicroAlgos
+    /// Each nil while the proposals are on their way, and shown as a dash in a
+    /// row of the same height.
+    var proposals24h: Int?
+    var earned24h: MicroAlgos?
+    var proposals7d: Int?
+    var earned7d: MicroAlgos?
     /// Only the ALGO amounts are masked. Masking the block counts too would
     /// leave the rows with nothing to read, and a proposal count still tracks
     /// the account's share of online stake, so this is a screen-sharing
@@ -660,7 +678,7 @@ struct ProposalsGrid: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    private func row(_ span: String, _ blocks: Int, _ earned: MicroAlgos) -> some View {
+    private func row(_ span: String, _ blocks: Int?, _ earned: MicroAlgos?) -> some View {
         GridRow {
             Text(span)
                 .font(Typography.primary)
@@ -669,11 +687,11 @@ struct ProposalsGrid: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
 
             // Singular matters: "1 blocks" reads as unfinished.
-            Text(quantity(Double(blocks), "block"))
+            Text(blocks.map { quantity(Double($0), "block") } ?? "–")
                 .font(Typography.primary.monospacedDigit())
                 .gridColumnAlignment(.trailing)
 
-            Text(Format.algosLabel(earned, hidden: isHidden))
+            Text(earned.map { Format.algosLabel($0, hidden: isHidden) } ?? "–")
                 .font(Typography.primary.monospacedDigit())
                 .foregroundStyle(.secondary)
                 .gridColumnAlignment(.trailing)

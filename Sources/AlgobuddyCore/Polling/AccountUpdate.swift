@@ -47,6 +47,15 @@ public struct AccountUpdate: Sendable {
         self.isStale = isStale
     }
 
+    /// This entry with a later answer from its rewards query: the figures that
+    /// query gave, and its failure if it ended in one.
+    func answered(rewards: RewardsSummary?, failure: PollFailure?) -> AccountUpdate {
+        AccountUpdate(
+            address: address, account: account, absence: absence, challenge: challenge,
+            keyExpiry: keyExpiry, rewards: rewards, failure: failure, fetchedAt: fetchedAt,
+            isStale: isStale)
+    }
+
     /// This entry, carried into a later cycle whose fetch of the account failed.
     func stale(failure: PollFailure?) -> AccountUpdate {
         AccountUpdate(

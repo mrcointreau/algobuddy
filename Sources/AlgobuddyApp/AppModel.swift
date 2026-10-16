@@ -99,6 +99,10 @@ final class AppModel {
         return failure
     }
 
+    /// Whether the watch has an indexer, which the proposal figures come from.
+    /// Until its first answer, the panel holds their place.
+    var expectsRewards: Bool { applied?.indexerURL != nil }
+
     /// The account whose detail the panel shows, or nil for the list of all of
     /// them. Held here rather than in the view, so the panel can drop it when it
     /// closes and `apply()` can drop it when the account leaves the watch.
@@ -674,10 +678,22 @@ final class AppModel {
     // MARK: - Notifications
 
     private func receive(_ value: ChainPoller.Update) {
+        // A cycle's update comes again, with the same observation time, when
+        // its rewards query answers. That is no further poll, so the counts
+        // the heartbeat reports leave it out.
+        let isPoll = value.observedAt != update?.observedAt
         update = value
         if value.hasData { lastData = value }
         saveAlertHistory(value.alertHistory, severities: value.alertSeverities)
-        if let failure = value.failure {
+        if !isPoll {
+            if let failure = value.entries.compactMap(\.failure).first(where: {
+                $0.stage == .rewards
+            }) {
+                log.error("rewards failed: \(failure.message)")
+            } else {
+                log.info("rewards answered")
+            }
+        } else if let failure = value.failure {
             failureCount += 1
             log.error("poll failed at \(failure.stage.rawValue): \(failure.message)")
         } else {

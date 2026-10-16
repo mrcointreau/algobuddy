@@ -221,12 +221,17 @@ public actor ChainPoller {
     /// concurrently: duplicate requests, double-counted failures, and an
     /// older update publishing after a newer one.
     private var cycleInFlight = false
+    /// The update most recently published, which a rewards answer arriving
+    /// between cycles is shown in. See `republishRewards()`.
+    private var lastPublished: Update?
 
     private func runCycle() async {
         guard !cycleInFlight else { return }
         cycleInFlight = true
         defer { cycleInFlight = false }
-        publish(await pollOnce())
+        let update = await pollOnce()
+        lastPublished = update
+        publish(update)
     }
 
     /// Stops polling **permanently**. To resume, build a new poller.
@@ -291,8 +296,8 @@ public actor ChainPoller {
     /// Runs a single poll and returns the result. Split out from `start()` so
     /// every behaviour below is testable without timers or sleeping. Callers
     /// that publish go through `runCycle()`, which owns the in-flight guard.
-    /// A rewards fetch it starts reports to a later update; see
-    /// `rewardsSettled()`.
+    /// A rewards fetch it starts answers after it: in the published update
+    /// again, or in the next one; see `rewardsSettled()`.
     @discardableResult
     public func pollOnce() async -> Update {
         let now = dates.now
@@ -464,12 +469,14 @@ public actor ChainPoller {
         }
     }
 
-    /// Takes in a finished rewards fetch, whichever cycle is under way. A
-    /// failed query leaves the account's figures as they were and records why.
+    /// Takes in a finished rewards fetch, whichever cycle is under way, and
+    /// shows it at once. A failed query leaves the account's figures as they
+    /// were and records why.
     ///
-    /// The next cycle shows the result. A cycle run at once to show it sooner
-    /// would give the round clock a sample over a second or so, where one
-    /// round more or less is most of the measurement, and skew every countdown.
+    /// Shown in the last update, published again, rather than in a cycle run
+    /// at once: that cycle would give the round clock a sample over a second
+    /// or so, where one round more or less is most of the measurement, and
+    /// skew every countdown.
     private func receiveRewards(
         _ results: [(AlgorandAddress, Result<ProposalPage, any Error>)],
         windowStart: UInt64, round: UInt64, requestedAt: Date
@@ -488,6 +495,58 @@ public actor ChainPoller {
             }
             rewards[address] = state
         }
+        republishRewards()
+    }
+
+    /// Publishes the last update again with each account's latest rewards, so
+    /// an answer that lands between cycles shows at once rather than with the
+    /// next cycle, up to an interval later. Nothing else in the update changes:
+    /// no request is made, the round clock takes no sample, and nothing is
+    /// dispatched, since no alert rule reads rewards.
+    private func republishRewards() {
+        guard !isStopped, let last = lastPublished else { return }
+        var changed = false
+        let entries = last.entries.map { entry -> AccountUpdate in
+            // Only an account fetched in that cycle has its rewards shown with
+            // it. A stale entry carries an earlier cycle's figures as a whole.
+            guard entry.account != nil, !entry.isStale else { return entry }
+            let summary = rewardsSummary(for: entry.address, now: last.observedAt)
+            let failure = rewards[entry.address]?.failure
+            guard summary != entry.rewards || failure != entry.failure else { return entry }
+            changed = true
+            let answered = entry.answered(rewards: summary, failure: failure)
+            // A later cycle that fails to fetch the account carries this
+            // entry, so it carries these rewards too.
+            if let held = lastGood[entry.address] {
+                lastGood[entry.address] = LastGood(entry: answered, alerts: held.alerts)
+            }
+            return answered
+        }
+        guard changed else { return }
+        let shared = last.failure.flatMap { $0.stage.isShared ? $0 : nil }
+        let update = Update(
+            observedAt: last.observedAt,
+            currentRound: last.currentRound,
+            entries: entries,
+            roundTime: last.roundTime,
+            alerts: last.alerts,
+            notifications: [],
+            failure: shared ?? entries.compactMap(\.failure).first,
+            alertHistory: last.alertHistory,
+            alertSeverities: last.alertSeverities)
+        lastPublished = update
+        publish(update)
+    }
+
+    /// An account's proposal history as of `now`. Nil until the indexer has
+    /// answered once for it: publishing the empty tracker before that would
+    /// present "0 blocks, 0.00 ALGO" as real data while the rewards fetch is in
+    /// fact failing or pending.
+    private func rewardsSummary(for address: AlgorandAddress, now: Date) -> RewardsSummary? {
+        guard let state = rewards[address], state.fetchedAt != nil else { return nil }
+        var summary = state.tracker.summary(now: now)
+        summary.isTruncated = state.isTruncated
+        return summary
     }
 
     /// Waits until the rewards fetch under way, if any, has been taken in. No
@@ -599,15 +658,6 @@ public actor ChainPoller {
                 params: config.params)
         }
 
-        // Nil until the indexer has answered once for this account. Publishing
-        // the empty tracker before that would present "0 blocks, 0.00 ALGO" as
-        // real data while the rewards fetch is in fact failing or pending.
-        var rewardsSummary: RewardsSummary?
-        if let state = rewards[address], state.fetchedAt != nil {
-            rewardsSummary = state.tracker.summary(now: now)
-            rewardsSummary?.isTruncated = state.isTruncated
-        }
-
         return AccountUpdate(
             address: address,
             account: account,
@@ -616,7 +666,7 @@ public actor ChainPoller {
             keyExpiry: account.participation.map {
                 KeyExpiry(participation: $0, currentRound: round)
             },
-            rewards: rewardsSummary,
+            rewards: rewardsSummary(for: address, now: now),
             failure: failure,
             fetchedAt: now)
     }

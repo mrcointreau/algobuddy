@@ -24,6 +24,8 @@ struct AddressDraft: Identifiable {
     /// The account this row held when the list was last applied, which stays
     /// watched while the text is mid-edit. See `WatchList.Row`.
     var held: AlgorandAddress?
+    /// The name field's text, as typed. See `AccountNames`.
+    var name = ""
 }
 
 @MainActor
@@ -47,6 +49,10 @@ final class AppModel {
     /// control, and there is nothing here to secure: the address is public chain
     /// data and the app holds no keys.
     var valuesHidden = false
+    /// What the panel and notifications call each account, keyed by address
+    /// and applied with the list. Labels for the user's own eyes: stored on
+    /// this Mac and never sent to any host.
+    private(set) var accountNames = AccountNames()
     var algodURLText = Defaults.algodURL
     var indexerURLText = Defaults.indexerURL
     var metrics: Set<MenuBarMetric> = [.round]
@@ -147,6 +153,10 @@ final class AppModel {
     /// than a serialisation and cfprefsd round trip every 30 seconds.
     private var persistedHistory: [AlertKey: Date]?
     private var persistedSeverities: [AlertKey: AlertSeverity]?
+    /// The names as last written, so an apply that renames nothing writes
+    /// nothing. Nil until the first apply, which therefore always writes, and
+    /// so drops any name the store kept for an address no longer listed.
+    private var persistedNames: [String: String]?
     /// Keeps banners visible while the app itself is active; see the class.
     private let notificationPresenter = NotificationPresenter()
 
@@ -166,6 +176,7 @@ final class AppModel {
     /// Read on load and cleared on the first save, so the watch it names
     /// carries over exactly once and the address does not outlive the list.
     private let singleAddressKey = "address"
+    private let accountNamesKey = "accountNames"
 
     // MARK: - Derived state
 
@@ -410,7 +421,13 @@ final class AppModel {
         let stored = WatchList.restore(
             list: defaults.array(forKey: "addresses") as? [String],
             single: defaults.string(forKey: singleAddressKey))
-        addressDrafts = stored.isEmpty ? [AddressDraft()] : stored.map { AddressDraft(text: $0) }
+        let names = AccountNames(
+            stored: (defaults.dictionary(forKey: accountNamesKey) ?? [:])
+                .compactMapValues { $0 as? String })
+        addressDrafts =
+            stored.isEmpty
+            ? [AddressDraft()]
+            : stored.map { AddressDraft(text: $0, name: names.stored[$0] ?? "") }
         algodURLText = defaults.string(forKey: "algodURL") ?? Defaults.algodURL
         indexerURLText = defaults.string(forKey: "indexerURL") ?? Defaults.indexerURL
         if let stored = defaults.array(forKey: "metrics") as? [String] {
@@ -476,6 +493,10 @@ final class AppModel {
         // persisted stays exactly what is running.
         let rows = addressDrafts.map { WatchList.Row(text: $0.text, held: $0.held) }
         let addresses = WatchList.resolve(rows)
+        // A row's name belongs to the account the row watches, so it follows
+        // that address and leaves the list with it.
+        let names = AccountNames(
+            zip(rows, addressDrafts).map { (account: $0.watched, name: $1.name) })
 
         guard !addresses.isEmpty else {
             // Deliberate clearing is persisted; a stored address must not
@@ -485,6 +506,7 @@ final class AppModel {
             stopWatching()
             sourceError = nil
             hold(rows)
+            keep(names)
             return
         }
         let typedAlgod = SourceURL.parse(algodURLText)
@@ -512,6 +534,9 @@ final class AppModel {
         let watched = addresses.map(\.stringValue)
         let next = AppliedWatch(addresses: watched, algodURL: algodURL, indexerURL: indexerURL)
         hold(rows)
+        // Ahead of the check below, because a name changes nothing that is
+        // polled: a rename alone shows at once and leaves the poller running.
+        keep(names)
         // When nothing changed, the running poller is left in peace; a focus
         // change or an identical re-submit costs no writes and no teardown.
         if next.identity == applied?.identity, isRunning { return }
@@ -741,6 +766,15 @@ final class AppModel {
 
     // MARK: - Editing the list
 
+    /// Shows the names the rows give, and stores them when they differ from
+    /// what was last stored.
+    private func keep(_ names: AccountNames) {
+        if names != accountNames { accountNames = names }
+        guard names.stored != persistedNames else { return }
+        UserDefaults.standard.set(names.stored, forKey: accountNamesKey)
+        persistedNames = names.stored
+    }
+
     /// Records the account each row watches now. A row keeps it through a
     /// later edit, until its text names another account or is cleared.
     private func hold(_ rows: [WatchList.Row]) {
@@ -877,10 +911,11 @@ final class AppModel {
         content.body = alert.body
         // Which account this holds for. Only past one watched account: with a
         // single one the banner would name the only thing it could be about.
-        // Masked like every other surface, because a banner is on screen during
-        // exactly the screen share the mask is for.
+        // Named and masked like every other surface, because a banner is on
+        // screen during exactly the screen share the mask is for.
         if accountCount > 1, let address = alert.address {
-            content.subtitle = Format.addressLabel(address.stringValue, hidden: valuesHidden)
+            content.subtitle = Format.accountLabel(
+                address, names: accountNames, hidden: valuesHidden)
         }
         content.sound = alert.severity == .critical ? .default : nil
 

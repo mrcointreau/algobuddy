@@ -59,7 +59,7 @@ make purge       # the same, and also forgets the addresses, settings and HTTP c
 
 Everything lives in Settings (⌘,):
 
-- **Account**: the addresses to watch, added and removed a row at a time. There's no limit on how many; each one adds a request to every poll. With more than one, the panel lists them with their totals, and each opens its own page
+- **Account**: the addresses to watch, added and removed a row at a time, each with an optional name of up to 32 characters. There's no limit on how many; each one adds a request to every poll. With more than one, the panel lists them with their totals, and each opens its own page. A name labels its account in the panel and in notifications, and stays visible when values are hidden (⌘P). Names are stored on your Mac and never sent anywhere
 - **Menu bar**: which metrics to show, with a live width estimate. A wide menu bar item isn't shortened on a notched display, it's hidden entirely
 - **Chain data source**: algod and indexer URLs, defaulting to a public provider. Point them at your own node if you'd rather not have a third party see which addresses you watch
 - **Notifications**: on by default

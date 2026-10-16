@@ -303,6 +303,11 @@ enum Format {
         return "\(value)"
     }
 
+    /// A round in full, as `goal` prints it, where the menu bar's compact form
+    /// would round it off. Without the locale's grouping, which in some
+    /// locales is a dot and would read as a decimal beside the amounts.
+    static func exactRound(_ value: UInt64) -> String { "\(value)" }
+
     static func duration(_ seconds: TimeInterval) -> String {
         guard seconds.isFinite else { return "-" }
         if seconds <= 0 { return "overdue" }

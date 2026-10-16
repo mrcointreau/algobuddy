@@ -298,7 +298,8 @@ public struct AlertEngine: Sendable {
                         id: .keyExpiry, severity: .critical,
                         title: "Participation keys expiring",
                         body:
-                            "They expire in about \(duration(remaining)), after which the account stops participating. Generate new keys and register them."
+                            "They expire in about \(duration(remaining)), after which the account stops participating. "
+                            + registrationAdvice(expiry, snapshot)
                     ))
             } else if days <= thresholds.keyExpiryWarningDays {
                 alerts.append(
@@ -337,5 +338,23 @@ public struct AlertEngine: Sendable {
         }
 
         return alerts
+    }
+
+    /// When to register new keys. They take effect only once the balance
+    /// lookback has passed since their registration, so keys registered too
+    /// close to the end leave the account without keys for a while, and once
+    /// fewer rounds remain than the lookback, that gap cannot be avoided.
+    private func registrationAdvice(_ expiry: KeyExpiry, _ snapshot: Snapshot) -> String {
+        let lookback = snapshot.params.balanceLookback
+        let effect =
+            "New keys take effect \(lookback) rounds (about \(duration(Double(lookback) * snapshot.roundTime))) after they are registered"
+        let remaining = UInt64(max(0, expiry.roundsRemaining))
+        guard remaining < lookback else {
+            return effect
+                + ", so generate and register them at least that long before these expire."
+        }
+        let gap = duration(Double(lookback - remaining) * snapshot.roundTime)
+        return effect
+            + ", so generate and register them now: even then, the account has no keys in effect for about \(gap)."
     }
 }

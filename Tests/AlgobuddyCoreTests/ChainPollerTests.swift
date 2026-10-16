@@ -139,7 +139,9 @@ struct ChainPollerTests {
 
         #expect(stub.requestCount(containing: "/v2/accounts/") == 4)
         #expect(stub.requestCount(containing: "/v2/ledger/supply") == 1)
-        #expect(stub.requestCount(containing: "/v2/blocks/") == 1)
+        #expect(stub.requestCount(containing: "/v2/blocks/64030000") == 1)
+        // The round clock's anchor, asked for once at the first poll.
+        #expect(stub.requestCount(containing: "/v2/blocks/64029200") == 1)
     }
 
     @Test("supply is refreshed once its interval lapses")
@@ -169,7 +171,8 @@ struct ChainPollerTests {
         clock.advance(30)
         _ = await poller.pollOnce()
 
-        #expect(stub.requestCount(containing: "/v2/blocks/") == 2)
+        #expect(stub.requestCount(containing: "/v2/blocks/64030000") == 1)
+        #expect(stub.requestCount(containing: "/v2/blocks/64031000") == 1)
     }
 
     // MARK: - Failure handling
@@ -563,7 +566,7 @@ struct ChainPollerTests {
 
         clock.advance(30)
         _ = await poller.pollOnce()
-        #expect(stub.requestCount(containing: "/v2/blocks/") == 2)
+        #expect(stub.requestCount(containing: "/v2/blocks/64030000") == 2)
     }
 
     /// Before the indexer has answered once there is no rewards data, and zero
@@ -1041,6 +1044,68 @@ struct ChainPollerTests {
         #expect(abs(update.roundTime - 3.0) < 0.2)
     }
 
+    /// A block 900 rounds back carries the time it was made, so the first poll
+    /// already has the rate over a long span instead of the nominal figure.
+    @Test("the first poll times the round clock from an earlier block")
+    func anchoredRoundTime() async throws {
+        let stub = StubFetcher()
+        let clock = TestClock()
+        // Before the general block route, so it answers for its own round.
+        let anchorTime = Int64(clock.now.timeIntervalSince1970 - 900 * 2.76)
+        stub.route(
+            "/v2/blocks/64029200",
+            json: JSONBuilder.blockHeader(round: 64_029_200, seed: nil, timestamp: anchorTime))
+        standardRoutes(stub, seed: nonMatchingSeed)
+        let poller = makePoller(stub: stub, clock: clock)
+
+        let first = await poller.pollOnce()
+        #expect(abs(first.roundTime - 2.76) < 0.01)
+        #expect(first.failure == nil)
+
+        clock.advance(30)
+        _ = await poller.pollOnce()
+        #expect(stub.requestCount(containing: "/v2/blocks/64029200") == 1)
+    }
+
+    /// An answer for another round says nothing about the round asked for,
+    /// however plausible the rate it would give.
+    @Test("a block header for another round does not time the clock")
+    func anchorForAnotherRound() async throws {
+        let stub = StubFetcher()
+        let clock = TestClock()
+        let anchorTime = Int64(clock.now.timeIntervalSince1970 - 900 * 2.76)
+        stub.route(
+            "/v2/blocks/64029200",
+            json: JSONBuilder.blockHeader(round: 64_029_000, seed: nil, timestamp: anchorTime))
+        standardRoutes(stub, seed: nonMatchingSeed)
+        let update = await makePoller(stub: stub, clock: clock).pollOnce()
+        #expect(update.roundTime == RoundClock.nominal)
+        #expect(stub.requestCount(containing: "/v2/blocks/64029200") == 1)
+    }
+
+    /// Three rounds in eight seconds is no measurement, and taking it as one
+    /// moved every countdown by several percent. The next poll measures from
+    /// the poll before the refresh instead.
+    @Test("a refresh seconds after a poll leaves the round time alone")
+    func refreshKeepsRoundTime() async throws {
+        let stub = StubFetcher()
+        let clock = TestClock()
+        let poller = makePoller(stub: stub, clock: clock)
+
+        standardRoutes(stub, round: 64_030_100, seed: nonMatchingSeed)
+        _ = await poller.pollOnce()
+        clock.advance(8)
+        standardRoutes(stub, round: 64_030_103, seed: nonMatchingSeed)
+        let refreshed = await poller.pollOnce()
+        #expect(refreshed.roundTime == RoundClock.nominal)
+
+        clock.advance(22)
+        standardRoutes(stub, round: 64_030_111, seed: nonMatchingSeed)
+        let next = await poller.pollOnce()
+        let blended = RoundClock.nominal + 0.2 * (30.0 / 11 - RoundClock.nominal)
+        #expect(abs(next.roundTime - blended) < 1e-9)
+    }
+
     /// The round-time estimate moves slightly from poll to poll, so a key
     /// countdown near a threshold can read either side of it. Crossing three
     /// days left must announce critical once, not on every rise.
@@ -1169,7 +1234,8 @@ struct ChainPollerTests {
         // more request rather than three.
         #expect(stub.requestCount(containing: "/v2/accounts/") == 2)
         #expect(stub.requestCount(containing: "/v2/ledger/supply") == 1)
-        #expect(stub.requestCount(containing: "/v2/blocks/") == 1)
+        #expect(stub.requestCount(containing: "/v2/blocks/64030000") == 1)
+        #expect(stub.requestCount(containing: "/v2/blocks/64029200") == 1)
     }
 
     /// One address that cannot be fetched must not stop the others being

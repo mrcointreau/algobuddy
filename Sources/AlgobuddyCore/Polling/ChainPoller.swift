@@ -151,6 +151,13 @@ public actor ChainPoller {
     private var supplyFetchedAt: Date?
     private var challengeSeed: Data?
     private var challengeSeedRound: UInt64?
+    /// Whether the round clock's anchor block has been asked for. Once per
+    /// poller: whatever the answer, the clock times itself after that.
+    private var anchorRequested = false
+    /// How far back the anchor block lies: about 41 minutes of rounds, past
+    /// the half hour the round clock needs for a long span, and within the
+    /// last 1000 rounds, which a non-archival algod keeps.
+    static let anchorDistance: UInt64 = 900
     private var failingSince: Date?
     private var consecutiveFailures = 0
     private var isStopped = false
@@ -352,8 +359,16 @@ public actor ChainPoller {
         let challengeRound = Challenge.challengeRound(for: round, params: config.params)
         let seedRound = challengeRound != challengeSeedRound ? challengeRound : nil
 
+        // The first cycle times the round clock against a block well in the
+        // past, so countdowns are right from launch rather than after half an
+        // hour of polls.
+        let anchorRound =
+            !anchorRequested && round > Self.anchorDistance ? round - Self.anchorDistance : nil
+        if anchorRound != nil { anchorRequested = true }
+
         async let supplyFetch = Self.attempt(needSupply ? algod : nil) { try await $0.supply() }
         async let seedFetch = Self.attempt(seedRound) { try await algod.blockHeader($0) }
+        async let anchorFetch = Self.attempt(anchorRound) { try await algod.blockHeader($0) }
 
         var failure: PollFailure?
 
@@ -392,6 +407,16 @@ public actor ChainPoller {
             failure = failure ?? pollFailure(error, at: .challengeSeed)
         case nil:
             break
+        }
+
+        // Only a header for the round asked for, with its time. Anything else,
+        // a failure included, leaves the clock to time itself, which it does
+        // within half an hour, so it is no failure of the cycle.
+        if case .success(let header) = await anchorFetch, let anchorRound,
+            header.round == anchorRound, let timestamp = header.timestamp
+        {
+            roundClock.anchor(
+                round: anchorRound, at: Date(timeIntervalSince1970: TimeInterval(timestamp)))
         }
 
         let fetched = addresses.filter { accounts[$0] != nil }

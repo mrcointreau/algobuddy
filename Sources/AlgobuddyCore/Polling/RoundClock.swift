@@ -12,13 +12,18 @@ public struct SystemDateProvider: DateProviding {
 /// Estimates wall-clock seconds per round by watching the round advance.
 ///
 /// Every countdown the UI shows (days of key validity, hours of absence
-/// headroom, minutes to a challenge deadline) is rounds multiplied by this. It
-/// starts at the nominal 2.8 s and moves towards the observed rate with every
-/// poll, so early countdowns on a chain with a different round time carry part
-/// of the nominal figure's error for the first few minutes. Once the rounds have
-/// been watched for half an hour, the estimate is the rate over that whole span.
+/// headroom, minutes to a challenge deadline) is rounds multiplied by this. Once
+/// the rounds span half an hour, the estimate is the rate over that whole span.
+/// An anchor, a past round whose time a block's timestamp gives, provides such
+/// a span from the first poll. Without one the estimate starts at the nominal
+/// 2.8 s and moves towards the observed rate with every poll, so early
+/// countdowns on a chain with a different round time carry part of the nominal
+/// figure's error until the span is long enough.
 public struct RoundClock: Sendable, Equatable {
     public static let nominal: TimeInterval = 2.8
+    /// The fewest rounds a single sample spans, so one round more or less is
+    /// at most a tenth of it. A 30 s poll sees 10 or 11.
+    static let minimumSampleRounds: UInt64 = 10
     /// Samples outside this band are discarded as observation artefacts rather
     /// than folded into the estimate.
     static let plausible: ClosedRange<TimeInterval> = 0.5...30
@@ -54,14 +59,21 @@ public struct RoundClock: Sendable, Equatable {
 
     public mutating func observe(round: UInt64, at date: Date) {
         extendSpan(round: round, at: date)
-        defer {
-            lastRound = round
-            lastObservedAt = date
-        }
         guard let previousRound = lastRound,
             let previousDate = lastObservedAt,
             round > previousRound
-        else { return }
+        else {
+            lastRound = round
+            lastObservedAt = date
+            return
+        }
+        // Too few rounds to measure, as when a refresh lands seconds after a
+        // poll: a sample over three rounds can be a third off, and would move
+        // every countdown by part of that. The earlier observation stays the
+        // start, so the next sample spans both.
+        guard round - previousRound >= Self.minimumSampleRounds else { return }
+        lastRound = round
+        lastObservedAt = date
 
         let elapsed = date.timeIntervalSince(previousDate)
         let rounds = Double(round - previousRound)
@@ -77,6 +89,18 @@ public struct RoundClock: Sendable, Equatable {
         // and would move every countdown by as much at each launch.
         smoothed += Self.smoothing * (sample - smoothed)
         sampleCount += 1
+    }
+
+    /// Starts the long span at an earlier round whose time is known, as a
+    /// block's timestamp tells it, so the estimate is the rate over a long
+    /// span from the first poll on. The block's time is its proposer's clock
+    /// and the observations are this Mac's, so the two clocks' difference
+    /// divided by the span is the error, a small fraction of a percent over
+    /// the span the poller asks for. Ignored unless it is earlier, in round and
+    /// in time, than the span's start.
+    public mutating func anchor(round: UInt64, at date: Date) {
+        if let first = checkpoints.first, round >= first.round || date >= first.date { return }
+        checkpoints.insert(Observation(round: round, date: date), at: 0)
     }
 
     /// Each 30 s poll sees 10 or 11 whole rounds, so single samples swing by

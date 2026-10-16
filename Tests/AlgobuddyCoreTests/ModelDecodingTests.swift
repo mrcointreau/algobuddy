@@ -93,6 +93,15 @@ struct ModelDecodingTests {
         }
     }
 
+    /// The round and the time it was made, which time the round clock.
+    @Test("block headers decode their round and timestamp")
+    func blockHeaderRoundAndTime() throws {
+        let header = try Fixture.decode(BlockHeaderResponse.self, "mainnet-block-64030256.json")
+            .block
+        #expect(header.round == 64_030_256)
+        #expect(header.timestamp == 1_786_627_672)
+    }
+
     @Test("account exposes participation and incentive fields")
     func account() throws {
         let account = try Fixture.decode(AccountState.self, "mainnet-account.json")

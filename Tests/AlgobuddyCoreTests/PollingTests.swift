@@ -63,6 +63,45 @@ struct RoundClockTests {
         #expect(abs(clock.estimate - 2.8) < 0.01)
     }
 
+    /// A refresh seconds after a poll sees a few rounds, where one round more or
+    /// less is a large part of the sample. Its start stays, so the next sample
+    /// spans both.
+    @Test("a sample over too few rounds waits for a longer one")
+    func shortSampleWaits() {
+        var clock = RoundClock()
+        clock.observe(round: 1_000, at: start)
+        clock.observe(round: 1_003, at: start.addingTimeInterval(8))
+        #expect(clock.sampleCount == 0)
+        #expect(clock.estimate == RoundClock.nominal)
+
+        clock.observe(round: 1_011, at: start.addingTimeInterval(30))
+        #expect(clock.sampleCount == 1)
+        let blended = RoundClock.nominal + 0.2 * (30.0 / 11 - RoundClock.nominal)
+        #expect(abs(clock.estimate - blended) < 1e-9)
+    }
+
+    @Test("an anchor gives the rate over a long span from the first observation")
+    func anchorGivesLongSpan() {
+        var clock = RoundClock()
+        clock.anchor(round: 1_000, at: start)
+        clock.observe(round: 1_900, at: start.addingTimeInterval(900 * 2.76))
+        #expect(abs(clock.estimate - 2.76) < 1e-9)
+        #expect(clock.sampleCount == 0)
+    }
+
+    /// An anchor is the start of the span, so one that is not earlier in both
+    /// round and time than the start already held is ignored. Taking either of
+    /// these would shorten the span below half an hour and lose the rate.
+    @Test("an anchor that is not earlier than the span's start is ignored")
+    func lateAnchorIgnored() {
+        var clock = RoundClock()
+        clock.anchor(round: 1_000, at: start)
+        clock.anchor(round: 1_500, at: start.addingTimeInterval(1_000))
+        clock.anchor(round: 500, at: start.addingTimeInterval(1_000))
+        clock.observe(round: 1_900, at: start.addingTimeInterval(900 * 2.76))
+        #expect(abs(clock.estimate - 2.76) < 1e-9)
+    }
+
     /// Each 30 s poll sees 10 or 11 whole rounds of 2.8 s, a swing of about 5%
     /// per sample. Once the rounds have been watched long enough, the estimate
     /// comes from the whole span and stays within a small fraction of a percent.

@@ -13,7 +13,7 @@ jobs:
   commits:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
 
@@ -36,7 +36,7 @@ jobs:
     runs-on: macos-15
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       # Logged rather than assumed: a toolchain older than Swift 6 fails in
       # ways that look like source errors.

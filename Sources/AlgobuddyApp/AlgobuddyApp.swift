@@ -24,15 +24,15 @@ struct AlgobuddyApp: App {
         .menuBarExtraStyle(.window)
 
         // HIG: "When people choose the Settings item … your custom settings
-        // window opens." The Settings scene supplies the standard ⌘, binding and
-        // titles the window "algobuddy Settings" automatically.
+        // window opens." The Settings scene supplies the standard ⌘, binding,
+        // and the panes' TabView titles the window after the visible pane.
         Settings {
             SettingsView(model: model)
         }
         // HIG: "a settings window accommodates the size of the current pane, [so]
         // people don't need to expand the window to see more." Sizing to
-        // content keeps a scrollbar out of the form unless the screen is too
-        // short for it.
+        // content gives the window each pane's size, and keeps a scrollbar out
+        // of a pane unless the screen is too short for it.
         .windowResizability(.contentSize)
     }
 }

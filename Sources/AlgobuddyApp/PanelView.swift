@@ -385,12 +385,13 @@ enum SettingsWindow {
         observers.removeAll()
     }
 
+    /// Found by its identifier, which SwiftUI names after the Settings scene.
+    /// The title cannot find it: the window is titled after the visible pane.
     private static func settingsWindow() -> NSWindow? {
         NSApp.windows.first { window in
             guard window.isVisible, window.canBecomeMain else { return false }
             let identifier = window.identifier?.rawValue ?? ""
             return identifier.localizedCaseInsensitiveContains("settings")
-                || window.title.localizedCaseInsensitiveContains("settings")
         }
     }
 }

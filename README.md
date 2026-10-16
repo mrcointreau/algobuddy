@@ -32,11 +32,11 @@ make install
 
 That compiles on your machine and installs to `/Applications`. Building locally means Gatekeeper never gets involved: the quarantine attribute is only applied to downloaded files.
 
-Then open it, paste an Algorand address, and optionally tick **Open at login** in Settings.
+Then open it, paste an Algorand address, and optionally tick **Open at login** in the General pane of Settings.
 
 ## Updating
 
-Settings (⌘,) has a **Check for Updates** button. It asks GitHub for the latest release tag, compares it with the running version, and tells you which is newer. That request goes to `api.github.com`, carries nothing about you, and happens only when you click: there is no background check. Nothing is downloaded or run, so updating is still yours to do:
+The General pane of Settings (⌘,) has a **Check for Updates** button. It asks GitHub for the latest release tag, compares it with the running version, and tells you which is newer. That request goes to `api.github.com`, carries nothing about you, and happens only when you click: there is no background check. Nothing is downloaded or run, so updating is still yours to do:
 
 ```bash
 cd algobuddy
@@ -57,13 +57,12 @@ make purge       # the same, and also forgets the addresses, settings and HTTP c
 
 ## Configuration
 
-Everything lives in Settings (⌘,):
+Everything lives in Settings (⌘,), in four panes, and the window reopens on the pane you used last:
 
-- **Account**: the addresses to watch, added and removed a row at a time, each with an optional name of up to 32 characters. There's no limit on how many; each one adds a request to every poll. With more than one, the panel lists them with their totals, and each opens its own page. A name labels its account in the panel and in notifications, and stays visible when values are hidden (⌘P). Names are stored on your Mac and never sent anywhere
-- **Menu bar**: which metrics to show, with a live width estimate. A wide menu bar item isn't shortened on a notched display, it's hidden entirely
-- **Chain data source**: algod and indexer URLs, defaulting to a public provider. Point them at your own node if you'd rather not have a third party see which addresses you watch
-- **Notifications**: on by default
-- **Version**: the running build, and a manual check for a newer release
+- **General**: open at login, notifications (on by default), the running build, and a manual check for a newer release
+- **Accounts**: the addresses to watch, added and removed a row at a time, each with an optional name of up to 32 characters. There's no limit on how many; each one adds a request to every poll. With more than one, the panel lists them with their totals, and each opens its own page. A name labels its account in the panel and in notifications, and stays visible when values are hidden (⌘P). Names are stored on your Mac and never sent anywhere
+- **Menu Bar**: which metrics to show, with a live width estimate. A wide menu bar item isn't shortened on a notched display, it's hidden entirely
+- **Data Source**: algod and indexer URLs, defaulting to a public provider. Point them at your own node if you'd rather not have a third party see which addresses you watch
 
 ## What it deliberately doesn't do
 

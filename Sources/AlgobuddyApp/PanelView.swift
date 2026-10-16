@@ -1057,13 +1057,19 @@ private struct CappedHeight: Layout {
 }
 
 /// Keeps the panel's window at its content's height, hanging from the menu
-/// bar, and runs an action when the panel closes.
+/// bar under its item, and runs an action when the panel closes.
 ///
 /// A menu bar panel keeps its window height when its content changes height
 /// while it is open, and SwiftUI centres the content in the space, leaving
 /// bands above and below it. So the window is resized here instead. AppKit
 /// resizes a window about its bottom edge, so the origin moves with the height
 /// to keep the top edge where it is, under the menu bar.
+///
+/// The system places the panel against its menu bar item as it opens, but
+/// does not keep it there: when the item changes width while the panel is
+/// open, as it does when a figure appears in the menu bar or values are
+/// hidden, the item moves along the menu bar and the panel stays behind. So
+/// the panel follows its item here too.
 ///
 /// SwiftUI exposes no window for a menu bar panel, so the window is reached
 /// through an invisible AppKit view planted behind the content, and only that
@@ -1083,42 +1089,65 @@ private struct PanelWindowKeeper: NSViewRepresentable {
 
     func updateNSView(_ view: KeeperView, context: Context) {
         view.onClose = onClose
-        view.fit(to: contentHeight, animated: animates)
+        view.animates = animates
+        view.fit(to: contentHeight)
     }
 
     final class KeeperView: NSView {
         var onClose: () -> Void = {}
-        private var observer: (any NSObjectProtocol)?
+        var animates = true
+        private var observers: [any NSObjectProtocol] = []
         /// Whether the window has been fitted since the panel last opened. The
         /// first fit of each opening is immediate: there is no earlier size
         /// on screen for an animation to start from.
         private var hasFitted = false
+        /// The menu bar item the open panel hangs from. See `attach()`.
+        private weak var item: NSWindow?
+        /// The edge of the item the system lined the panel up with, and how
+        /// far from it the panel's own edge sits.
+        private var anchor: (trailing: Bool, offset: CGFloat)?
+        private var itemObservers: [any NSObjectProtocol] = []
+        /// Where a running animation is taking the window. A change made while
+        /// it runs joins it, since its next step would otherwise put the window
+        /// back on its old course.
+        private var animationTarget: NSRect?
 
         // The view has no window at construction, so the observation starts
         // once it is placed in one, and moves with it.
         override func viewDidMoveToWindow() {
             super.viewDidMoveToWindow()
-            if let observer {
+            for observer in observers {
                 NotificationCenter.default.removeObserver(observer)
-                self.observer = nil
             }
+            observers = []
+            detach()
             guard let window else { return }
-            // The panel resigns key as it closes.
-            observer = NotificationCenter.default.addObserver(
-                forName: NSWindow.didResignKeyNotification, object: window, queue: .main
-            ) { [weak self] _ in
-                // Posted on the main thread, where this view and the model live.
-                MainActor.assumeIsolated {
-                    self?.hasFitted = false
-                    self?.onClose()
-                }
-            }
+            let center = NotificationCenter.default
+            observers = [
+                // The panel resigns key as it closes.
+                center.addObserver(
+                    forName: NSWindow.didResignKeyNotification, object: window, queue: .main
+                ) { [weak self] _ in
+                    // Posted on the main thread, where this view and the model live.
+                    MainActor.assumeIsolated {
+                        self?.hasFitted = false
+                        self?.detach()
+                        self?.onClose()
+                    }
+                },
+                // And becomes key as it opens, already placed under its item.
+                center.addObserver(
+                    forName: NSWindow.didBecomeKeyNotification, object: window, queue: .main
+                ) { [weak self] _ in
+                    MainActor.assumeIsolated { self?.attach() }
+                },
+            ]
         }
 
         /// Sizes the window so the space SwiftUI gives the panel matches the
         /// content. This view sits behind a frame that fills that space, so its
         /// own height is the space, whatever the window wraps around it.
-        func fit(to height: CGFloat, animated: Bool) {
+        func fit(to height: CGFloat) {
             guard height > 0, bounds.height > 0, let window else { return }
             let change = height - bounds.height
             guard abs(change) > 0.5 else { return }
@@ -1126,15 +1155,90 @@ private struct PanelWindowKeeper: NSViewRepresentable {
             let top = frame.maxY
             frame.size.height += change
             frame.origin.y = top - frame.size.height
-            if animated, hasFitted, window.isVisible {
-                NSAnimationContext.runAnimationGroup { context in
-                    context.duration = 0.2
-                    window.animator().setFrame(frame, display: true)
-                }
-            } else {
-                window.setFrame(frame, display: true)
-            }
+            if let x = anchoredX(width: frame.width) { frame.origin.x = x }
+            place(frame, animated: animates && hasFitted && window.isVisible)
             hasFitted = true
+        }
+
+        /// Finds the menu bar item the panel opened under, and notes where the
+        /// system placed the panel against it.
+        ///
+        /// The item is one of this app's own windows at status bar level on the
+        /// panel's screen: of those, the one with an edge closest to the
+        /// matching edge of the panel. Without one close enough to be the
+        /// panel's, the panel is left where the system put it.
+        private func attach() {
+            detach()
+            guard let window, let screen = window.screen else { return }
+            let panel = window.frame
+            func gaps(_ item: NSWindow) -> (leading: CGFloat, trailing: CGFloat) {
+                (panel.minX - item.frame.minX, panel.maxX - item.frame.maxX)
+            }
+            func distance(_ item: NSWindow) -> CGFloat {
+                let gaps = gaps(item)
+                return min(abs(gaps.leading), abs(gaps.trailing))
+            }
+            let items = NSApp.windows.filter {
+                $0 !== window && $0.level == .statusBar && $0.screen == screen
+                    && $0.frame.height > 0 && abs($0.frame.minY - panel.maxY) < 40
+            }
+            guard let item = items.min(by: { distance($0) < distance($1) }),
+                distance(item) < panel.width
+            else { return }
+            let gaps = gaps(item)
+            anchor =
+                abs(gaps.leading) <= abs(gaps.trailing)
+                ? (trailing: false, offset: gaps.leading) : (trailing: true, offset: gaps.trailing)
+            self.item = item
+            let center = NotificationCenter.default
+            itemObservers = [NSWindow.didMoveNotification, NSWindow.didResizeNotification].map {
+                center.addObserver(forName: $0, object: item, queue: .main) { [weak self] _ in
+                    MainActor.assumeIsolated { self?.follow() }
+                }
+            }
+        }
+
+        private func detach() {
+            for observer in itemObservers {
+                NotificationCenter.default.removeObserver(observer)
+            }
+            itemObservers = []
+            item = nil
+            anchor = nil
+        }
+
+        /// The panel's left edge that keeps it where the system placed it
+        /// against its item, or nil while it is attached to none.
+        private func anchoredX(width: CGFloat) -> CGFloat? {
+            guard let item, let anchor else { return nil }
+            return anchor.trailing
+                ? item.frame.maxX + anchor.offset - width : item.frame.minX + anchor.offset
+        }
+
+        /// Moves the panel after its item, which has just moved or changed width.
+        private func follow() {
+            guard let window, window.isVisible else { return }
+            var frame = animationTarget ?? window.frame
+            guard let x = anchoredX(width: frame.width), abs(x - frame.minX) > 0.5 else { return }
+            frame.origin.x = x
+            place(frame, animated: animates)
+        }
+
+        private func place(_ frame: NSRect, animated: Bool) {
+            guard let window else { return }
+            guard animated || animationTarget != nil else {
+                window.setFrame(frame, display: true)
+                return
+            }
+            animationTarget = frame
+            NSAnimationContext.runAnimationGroup { context in
+                context.duration = animated ? 0.2 : 0
+                window.animator().setFrame(frame, display: true)
+            } completionHandler: { [weak self] in
+                MainActor.assumeIsolated {
+                    if self?.animationTarget == frame { self?.animationTarget = nil }
+                }
+            }
         }
     }
 }

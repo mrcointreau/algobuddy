@@ -29,8 +29,7 @@ struct EndpointTests {
     func clientHonoursPrefix() async throws {
         let stub = StubFetcher()
         let client = AlgodClient(
-            baseURL: try #require(URL(string: "https://host/algod")),
-            token: "t", fetcher: stub)
+            baseURL: try #require(URL(string: "https://host/algod")), fetcher: stub)
 
         _ = try? await client.supply()
         _ = try? await client.account("ABC")
@@ -40,6 +39,23 @@ struct EndpointTests {
                 "https://host/algod/v2/ledger/supply",
                 "https://host/algod/v2/accounts/ABC?exclude=all",
             ])
+    }
+
+    /// algobuddy holds no credentials, so the clients set no header of their
+    /// own, and no request they make can carry one.
+    @Test("the clients send no headers of their own")
+    func clientsSendNoHeaders() async throws {
+        let stub = StubFetcher()
+        let base = try #require(URL(string: "https://host"))
+        let algod = AlgodClient(baseURL: base, fetcher: stub)
+        _ = try? await algod.account("ABC")
+        _ = try? await algod.supply()
+        _ = try? await algod.blockHeader(1)
+        _ = try? await IndexerClient(baseURL: base, fetcher: stub)
+            .blockHeaders(proposer: "ABC", minRound: 10, limit: 100)
+
+        #expect(stub.requestHeaders.count == 4)
+        #expect(stub.requestHeaders.allSatisfy { $0.isEmpty })
     }
 
     @Test("IndexerClient requests land under the base path")

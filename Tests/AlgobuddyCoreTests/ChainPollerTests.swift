@@ -1745,4 +1745,26 @@ struct ChainPollerTests {
         // A healthy, eligible, well-funded account should be quiet.
         #expect(update.alerts.isEmpty)
     }
+
+    /// The protocol marks a few accounts, such as the fee sink, as not
+    /// participating. Watching one shows its record, with no failure and
+    /// nothing to alert about.
+    @Test("a not-participating account is watched without a failure")
+    func notParticipatingAccountIsWatched() async throws {
+        let stub = StubFetcher()
+        let clock = TestClock()
+        stub.route("/v2/accounts/", body: try Fixture.data("mainnet-account-feesink.json"))
+        stub.route("/v2/ledger/supply", body: try Fixture.data("mainnet-supply.json"))
+        // The block that opens the captured round's challenge window.
+        stub.route(
+            "/v2/blocks/", json: JSONBuilder.blockHeader(round: 66_067_000, seed: nonMatchingSeed))
+        let feeSink = try AlgorandAddress(
+            "Y76M3MSY6DKBRHBL7C3NNDXGS5IIMQVQVUAB6MP4XEMMGVF2QWNPL226CA")
+
+        let update = await makePoller(stub: stub, clock: clock, addresses: [feeSink]).pollOnce()
+
+        #expect(update.failure == nil)
+        #expect(update.only?.account?.status == .notParticipating)
+        #expect(update.alerts.isEmpty)
+    }
 }

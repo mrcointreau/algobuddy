@@ -6,10 +6,13 @@ import Foundation
 /// and like the block and supply endpoints this one is `public`, with no admin
 /// token, which is what lets the app run against any public API provider.
 public struct AccountState: Decodable, Sendable, Equatable {
+    /// The strings algod writes, from `Status.String()` in go-algorand's
+    /// `data/basics/userBalance.go`. One has a space, which the API description
+    /// leaves out.
     public enum Status: String, Decodable, Sendable {
         case online = "Online"
         case offline = "Offline"
-        case notParticipating = "NotParticipating"
+        case notParticipating = "Not Participating"
     }
 
     public let address: String

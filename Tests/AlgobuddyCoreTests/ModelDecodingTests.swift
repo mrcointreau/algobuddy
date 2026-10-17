@@ -118,6 +118,15 @@ struct ModelDecodingTests {
         #expect(account.lastSeen == expected)
     }
 
+    /// The fee sink is one of the accounts the protocol marks as not
+    /// participating, and algod writes that status with a space, which the API
+    /// description leaves out.
+    @Test("a not-participating account decodes from a captured mainnet response")
+    func notParticipatingAccount() throws {
+        let account = try Fixture.decode(AccountState.self, "mainnet-account-feesink.json")
+        #expect(account.status == .notParticipating)
+    }
+
     @Test("ledger supply handles its mixed key casing")
     func supply() throws {
         let supply = try Fixture.decode(LedgerSupply.self, "mainnet-supply.json")

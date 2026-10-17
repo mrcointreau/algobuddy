@@ -54,6 +54,7 @@ struct MenuBarLabel: View {
         Image(
             nsImage: MenuBarImage.render(
                 symbol: model.health.symbol, text: model.menuBarText,
+                maskWidth: model.menuBarMaskWidth,
                 description: MenuBar.spokenName(health: model.health, text: model.menuBarFigures)))
     }
 }

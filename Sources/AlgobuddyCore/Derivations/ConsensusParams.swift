@@ -2,11 +2,12 @@ import Foundation
 
 /// Consensus constants that govern incentives and suspension.
 ///
-/// These are **protocol-version dependent** and hardcoded to v40. Nothing
-/// checks the version the chain actually reports, so when a new consensus
-/// version ships, the absence, challenge, payout-window and key-registration
-/// figures will go on using these numbers without saying so. Keying them by
-/// `/v2/status.last-version` is the fix.
+/// These are **protocol-version dependent** and hardcoded to v40. Consensus
+/// versions v41 and v42 change none of them. Nothing checks the version the
+/// chain actually reports, so when a new consensus version ships, the absence,
+/// challenge, payout-window and key-registration figures will go on using
+/// these numbers without saying so. Keying them by `/v2/status.last-version`
+/// is the fix.
 ///
 /// Values transcribed from go-algorand `config/consensus.go` (`v40`) and
 /// `ledger/eval/eval.go` (`absentFactor`), not from documentation.

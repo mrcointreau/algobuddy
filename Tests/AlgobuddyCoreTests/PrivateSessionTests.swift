@@ -18,7 +18,10 @@ struct PrivateSessionTests {
         #expect(configuration.httpCookieStorage == nil)
         #expect(!configuration.httpShouldSetCookies)
         #expect(configuration.timeoutIntervalForResource == 60)
-        #expect(configuration.httpAdditionalHeaders?["User-Agent"] as? String == "algobuddy")
+        // Its one header of its own, so no request it sends carries a
+        // credential.
+        #expect(
+            configuration.httpAdditionalHeaders as? [String: String] == ["User-Agent": "algobuddy"])
         #expect(URLSessionFetcher.privateSession.delegate is RedirectGuard)
     }
 

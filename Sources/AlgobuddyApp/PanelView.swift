@@ -861,6 +861,17 @@ struct AccountRow: View {
     @Environment(\.accountNames) private var names
 
     var body: some View {
+        // A stale row's age ticks on its own, as the header's does, rather
+        // than waiting for a poll to redraw the panel, which during an outage
+        // can be minutes away. Every row ticks, stale or not, so a row that
+        // turns stale or recovers stays the same view, and keeps the pointer's
+        // highlight and VoiceOver's focus.
+        TimelineView(.periodic(from: .now, by: 10)) { context in
+            row(now: context.date)
+        }
+    }
+
+    private func row(now: Date) -> some View {
         Button(action: open) {
             HStack(spacing: 8) {
                 Image(systemName: health.symbol)
@@ -870,7 +881,7 @@ struct AccountRow: View {
 
                 VStack(alignment: .leading, spacing: 1) {
                     title
-                    facts.font(Typography.secondary)
+                    facts(now: now).font(Typography.secondary)
                 }
 
                 Spacer()
@@ -900,7 +911,7 @@ struct AccountRow: View {
         .buttonStyle(.plain)
         // One element read as a sentence, rather than five fragments.
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel(spoken)
+        .accessibilityLabel(spoken(now: now))
         .accessibilityAddTraits(.isButton)
     }
 
@@ -920,7 +931,7 @@ struct AccountRow: View {
     }
 
     /// The status, then the key countdown, coloured fact by fact.
-    private var facts: Text {
+    private func facts(now: Date) -> Text {
         guard let account = entry.account else {
             return Text(entry.failure?.message ?? "No data").foregroundColor(.secondary)
         }
@@ -932,7 +943,7 @@ struct AccountRow: View {
                 text + Text(" · ").foregroundColor(.secondary)
                 + Text(keysText).foregroundColor(keysLevel.textTint ?? .secondary)
         }
-        if let staleText {
+        if let staleText = staleText(now: now) {
             text =
                 text + Text(" · ").foregroundColor(.secondary)
                 + Text(staleText).foregroundColor(.orange)
@@ -940,13 +951,13 @@ struct AccountRow: View {
         return text
     }
 
-    /// How old a stale entry's figures are, so a row carried over from an
-    /// earlier poll never reads as current. Measured against now rather than
-    /// the displayed cycle, which during a full outage is itself old. The panel
-    /// redraws with every poll, which keeps the figure close enough.
-    private var staleText: String? {
+    /// How old a stale entry's figures are at `now`, so a row carried over
+    /// from an earlier poll never reads as current. Measured against the clock
+    /// rather than the displayed cycle, which during a full outage is itself
+    /// old.
+    private func staleText(now: Date) -> String? {
         guard entry.isStale, let fetchedAt = entry.fetchedAt else { return nil }
-        return "as of \(Format.relative(Date().timeIntervalSince(fetchedAt)))"
+        return "as of \(Format.relative(now.timeIntervalSince(fetchedAt)))"
     }
 
     private var keysText: String? {
@@ -961,12 +972,12 @@ struct AccountRow: View {
         MeterLevel(alerts.first { $0.id == .keyExpiry }?.severity)
     }
 
-    private var spoken: String {
+    private func spoken(now: Date) -> String {
         var parts = [Format.accountLabel(entry.address, names: names, hidden: isHidden)]
         if let account = entry.account {
             parts.append(account.statusText)
             if let keysText { parts.append(keysText) }
-            if let staleText { parts.append(staleText) }
+            if let staleText = staleText(now: now) { parts.append(staleText) }
         } else {
             parts.append(entry.failure?.message ?? "No data")
         }

@@ -10,7 +10,8 @@ struct UpdateCheckerTests {
     static let releaseURL = URL(
         string: "https://github.com/mrcointreau/algobuddy/releases/tag/v1.0.2")!
 
-    /// The two fields the checker reads, in the shape GitHub returns them.
+    /// A release in the shape GitHub returns it: the two fields the checker
+    /// reads, and two it ignores.
     static func release(tag: String, url: String = releaseURL.absoluteString) -> String {
         """
         {"tag_name":"\(tag)","html_url":"\(url)","name":"\(tag)","draft":false}
@@ -46,7 +47,8 @@ struct UpdateCheckerTests {
         #expect(ReleaseVersion("") == nil)
         #expect(ReleaseVersion("v") == nil)
         #expect(ReleaseVersion("-dirty") == nil)
-        // Underscores and signs parse as integers but are not versions.
+        // Neither an underscore nor a sign belongs in a version, though `Int`
+        // accepts a leading sign.
         #expect(ReleaseVersion("1.0.1_0") == nil)
         #expect(ReleaseVersion("1.0.+1") == nil)
     }
@@ -92,7 +94,8 @@ struct UpdateCheckerTests {
         #expect(status == .upToDate(latest: "1.0.2"))
     }
 
-    /// Someone building an unreleased `main` is ahead, not behind.
+    /// A build newer than the latest published release, as one from a newer tag
+    /// is, must not be offered a downgrade.
     @Test("a build newer than the latest release is up to date")
     func newerThanRelease() async {
         let fetcher = StubFetcher()

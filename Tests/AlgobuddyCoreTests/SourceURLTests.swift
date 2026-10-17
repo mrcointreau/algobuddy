@@ -25,8 +25,9 @@ struct SourceURLTests {
         #expect(parsed?.absoluteString == "https://node.example")
     }
 
-    /// The likeliest entry from someone following the advice to use their own
-    /// node: `URL(string:)` reads "localhost" there as the scheme, with no host.
+    /// "localhost:8080" is the likeliest entry from someone following the
+    /// advice to use their own node, and `URL(string:)` reads "localhost" in it
+    /// as the scheme, with no host.
     @Test("a URL without a host is refused")
     func refusesHostless() {
         for text in [

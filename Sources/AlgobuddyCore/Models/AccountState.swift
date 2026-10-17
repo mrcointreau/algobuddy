@@ -2,9 +2,9 @@ import Foundation
 
 /// `GET /v2/accounts/{address}`.
 ///
-/// Every field algobuddy needs for participation monitoring is here, and this is
-/// a `public` endpoint with no admin token. That is what lets the whole chain
-/// run against any public API provider.
+/// Every account field algobuddy needs for participation monitoring is here,
+/// and like the block and supply endpoints this one is `public`, with no admin
+/// token, which is what lets the app run against any public API provider.
 public struct AccountState: Decodable, Sendable, Equatable {
     public enum Status: String, Decodable, Sendable {
         case online = "Online"
@@ -16,8 +16,9 @@ public struct AccountState: Decodable, Sendable, Equatable {
     public let status: Status
     public let amount: MicroAlgos
     public let round: UInt64
-    /// Whether the account opted into consensus incentives. An Online account
-    /// with this false proposes blocks and earns nothing.
+    /// Whether the account opted into consensus incentives. algod omits the
+    /// field when it is false, so nil means not eligible, and an Online account
+    /// without `true` here proposes blocks and earns nothing.
     public let incentiveEligible: Bool?
     public let lastProposed: UInt64?
     public let lastHeartbeat: UInt64?

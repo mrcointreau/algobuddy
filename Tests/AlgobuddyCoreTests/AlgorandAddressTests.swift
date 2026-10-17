@@ -19,9 +19,8 @@ struct AlgorandAddressTests {
         #expect(try AlgorandAddress(Self.valid).stringValue == Self.valid)
     }
 
-    /// The point of validating the checksum at all: a transposed character
-    /// yields a syntactically fine address that monitors nothing, and the user
-    /// would see a permanently healthy dashboard for an account that isn't theirs.
+    /// The point of validating the checksum at all: one mistyped character
+    /// leaves a well-formed address that algod refuses with a bare 400.
     @Test("rejects a single-character typo")
     func rejectsTypo() throws {
         var typo = Array(Self.valid)
@@ -38,7 +37,7 @@ struct AlgorandAddressTests {
 
     @Test("rejects characters outside the base32 alphabet")
     func rejectsAlphabet() {
-        let bad = String(Self.valid.dropLast()) + "1"  // 0, 1, 8, 9 are not in the alphabet
+        let bad = String(Self.valid.dropLast()) + "1"  // The base32 alphabet has no 0, 1, 8 or 9.
         #expect(throws: (any Error).self) { try AlgorandAddress(bad) }
     }
 

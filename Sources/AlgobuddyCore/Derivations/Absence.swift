@@ -9,7 +9,9 @@ public struct AbsenceAssessment: Sendable, Equatable {
     public let roundsSinceLastSeen: UInt64
     /// Negative once the account is suspendable.
     public let headroomRounds: Int64
-    /// 0 = just seen, 1.0 = at the suspension boundary.
+    /// The rounds since the account was last seen, as a fraction of
+    /// `allowableLag`: 0 when just seen, 1 at the suspension boundary, and
+    /// above 1 once the account is suspendable.
     public let ratio: Double
     public let isAbsent: Bool
 
@@ -20,10 +22,9 @@ public struct AbsenceAssessment: Sendable, Equatable {
 
 /// Mirrors `isAbsent` in go-algorand `ledger/eval/eval.go`.
 ///
-/// The shape is worth internalising: `allowableLag` is inversely proportional to
-/// stake, so a **large staker is suspended sooner** than a small one after going
-/// dark. That is the opposite of most people's intuition and worth saying out
-/// loud in the UI.
+/// The shape is worth internalising: `allowableLag` is inversely proportional
+/// to stake, so a **large staker is suspended sooner** than a small one after
+/// going dark. That is the opposite of most people's intuition.
 public enum Absence {
 
     public static func assess(
@@ -33,24 +34,25 @@ public enum Absence {
         currentRound: UInt64,
         params: ConsensusParams
     ) -> AbsenceAssessment? {
-        // go-algorand carves these out explicitly: an account that has never been seen was online
-        // before payouts began, and it is noticed at its next proposal or keyreg rather than
-        // treated as absent.
+        // go-algorand carves these out explicitly: an account that has never
+        // been seen was online before payouts began, and it is noticed at its
+        // next proposal or keyreg rather than treated as absent.
         guard let lastSeen, lastSeen > 0, accountStake.raw > 0 else { return nil }
 
         guard
             let allowableLag = muldiv(params.absentFactor, totalOnlineStake.raw, accountStake.raw),
             allowableLag <= UInt64(UInt32.max)
         else {
-            // Overflow, or a lag longer than any network could survive. Source
-            // returns "not absent" rather than attempting the arithmetic.
+            // go-algorand returns "not absent" on an overflow, or for a lag
+            // longer than any network could survive, rather than attempting the
+            // arithmetic.
             return nil
         }
 
         let elapsed = currentRound > lastSeen ? currentRound - lastSeen : 0
         // Clamping and reordering, not trapping: the rounds come from a
-        // user-configured endpoint, and `elapsed` above Int64.max or a
-        // `lastSeen + allowableLag` sum past UInt64.max must degrade the
+        // user-configured endpoint, and `elapsed` above `Int64.max` or a
+        // `lastSeen + allowableLag` sum past `UInt64.max` must degrade the
         // numbers rather than crash the poller.
         let headroom = Int64(clamping: allowableLag) - Int64(clamping: elapsed)
 
@@ -58,12 +60,12 @@ public enum Absence {
             allowableLag: allowableLag,
             roundsSinceLastSeen: elapsed,
             headroomRounds: headroom,
-            // `allowableLag` can be zero when a supply endpoint reports no online
-            // stake, in which case any elapsed round already exceeds it and the
-            // ratio must say so.
+            // `allowableLag` can be zero when a supply endpoint reports no
+            // online stake, in which case any elapsed round already exceeds it
+            // and the ratio must say so.
             ratio: allowableLag > 0
                 ? Double(elapsed) / Double(allowableLag) : (elapsed > 0 ? .infinity : 0),
-            // The overflow-safe form of the source's `lastSeen + allowableLag
+            // The overflow-safe form of go-algorand's `lastSeen + allowableLag
             // < currentRound`.
             isAbsent: elapsed > allowableLag
         )

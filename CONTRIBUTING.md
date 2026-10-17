@@ -5,7 +5,7 @@
 Requires macOS 14+ and a Swift 6 toolchain (`xcode-select --install`).
 
 ```bash
-make check    # lint + tests, what CI runs
+make check    # lint, build and tests, as CI runs them
 make install  # build and install to /Applications
 ```
 
@@ -16,8 +16,8 @@ Commits follow [Conventional Commits](https://www.conventionalcommits.org): `<ty
 | Type | Use for | Version bump at release |
 |---|---|---|
 | `feat` | new user-visible behaviour | minor |
-| `fix` | bug fixes | patch |
-| `docs`, `refactor`, `perf`, `test`, `build`, `ci`, `chore`, `revert` | everything else | none |
+| `fix`, `perf`, `revert` | bug fixes, performance work, reverted changes | patch |
+| `docs`, `refactor`, `test`, `build`, `ci`, `chore` | everything else | none |
 
 Examples:
 

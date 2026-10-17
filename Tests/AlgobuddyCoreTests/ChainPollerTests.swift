@@ -8,7 +8,8 @@ struct ChainPollerTests {
     static let addressString = "3XBSYFKN4BT5HYBJ7V6VVJUYHYUVD5P7CAR77ZMCJSCK4LHLZLHDLYN2WQ"
     let address = try! AlgorandAddress(addressString)
 
-    /// Shares its leading byte with the address, so the challenge bit-match fires.
+    /// Shares its leading byte with the address, so the challenge bit-match
+    /// fires.
     var matchingSeed: Data { Data([address.publicKey[0]] + [UInt8](repeating: 0, count: 31)) }
     var nonMatchingSeed: Data {
         Data([address.publicKey[0] ^ 0x80] + [UInt8](repeating: 0, count: 31))
@@ -51,9 +52,10 @@ struct ChainPollerTests {
             "/v2/blocks/", json: JSONBuilder.blockHeader(round: round / 1_000 * 1_000, seed: seed))
     }
 
-    /// Polls, waits for the rewards fetch that poll started, and polls again
-    /// 30 seconds on: a rewards answer reaches the update of a later cycle,
-    /// never that of the cycle that asked.
+    /// Polls, waits for the rewards fetch that poll started, and polls again 30
+    /// seconds on. The update `pollOnce()` returns cannot carry the answer to
+    /// its own rewards fetch, which arrives after it, so the next cycle's
+    /// update is the first to show it.
     func pollAfterRewards(_ poller: ChainPoller, clock: TestClock) async -> ChainPoller.Update {
         _ = await poller.pollOnce()
         await poller.rewardsSettled()
@@ -62,7 +64,8 @@ struct ChainPollerTests {
     }
 
     /// What the poller publishes while `body` runs, collected until the poller
-    /// stops, so an update that never comes fails the test instead of hanging it.
+    /// stops, so an update that never comes fails the test instead of hanging
+    /// it.
     func published(
         by poller: ChainPoller, during body: () async -> Void
     ) async -> [ChainPoller.Update] {
@@ -107,8 +110,8 @@ struct ChainPollerTests {
         #expect(update.notifications.isEmpty)
     }
 
-    /// Round 64,030,160 leaves 40 of the 200 grace rounds, inside the band where
-    /// the node has missed its usual answering window.
+    /// Round 64,030,160 leaves 40 of the 200 grace rounds, inside the band
+    /// where the node has missed its usual answering window.
     @Test("a challenge near its deadline surfaces as a critical alert")
     func challengeFires() async throws {
         let stub = StubFetcher()
@@ -126,7 +129,7 @@ struct ChainPollerTests {
     // MARK: - Request economy
 
     /// Supply moves slowly and the seed only changes when the window rolls;
-    /// re-fetching either every 30 s would triple the load on a public endpoint
+    /// re-fetching both every 30 s would triple the load on a public endpoint
     /// for no new information.
     @Test("supply and challenge seed are cached between polls")
     func caching() async throws {
@@ -214,9 +217,11 @@ struct ChainPollerTests {
         stub.setFailing(true)
         let poller = makePoller(stub: stub, clock: clock)
 
+        // Five failures in 40 s, well past three attempts but short of the 120
+        // s the source alert also waits for.
         for _ in 0..<5 {
             #expect(await poller.pollOnce().alerts.isEmpty)
-            clock.advance(10)  // 50 s of failure, well past 3 attempts
+            clock.advance(10)
         }
     }
 
@@ -260,7 +265,8 @@ struct ChainPollerTests {
         clock.advance(30)
         _ = await poller.pollOnce()
 
-        // A fresh outage must serve the full threshold again, not inherit the old one.
+        // A fresh outage must serve the full threshold again, not inherit the
+        // old one.
         stub.setFailing(true)
         _ = await poller.pollOnce()
         clock.advance(15)
@@ -308,7 +314,7 @@ struct ChainPollerTests {
         let afterRestart = await second.pollOnce()
 
         #expect(afterRestart.alerts.contains { $0.id == .chainSourceUnreachable })
-        #expect(afterRestart.notifications.isEmpty)  // still alerting, but silent
+        #expect(afterRestart.notifications.isEmpty)  // Still alerting, but silent.
     }
 
     @Test("backoff grows with failures and resets on success")
@@ -334,8 +340,9 @@ struct ChainPollerTests {
         #expect(await poller.nextDelay == 30)
     }
 
-    /// Supply is a slow-moving denominator, so a stale one still beats
-    /// abandoning the absence assessment entirely.
+    /// Only the absence assessment needs the supply, so a failed supply fetch
+    /// leaves the account and its challenge state standing, and with no
+    /// denominator fetched yet the assessment is left out rather than guessed.
     @Test("a supply failure degrades rather than failing the cycle")
     func partialFailure() async throws {
         let stub = StubFetcher()
@@ -350,15 +357,14 @@ struct ChainPollerTests {
 
         let update = await makePoller(stub: stub, clock: clock).pollOnce()
 
-        #expect(update.only?.account != nil)  // the cycle still succeeded
+        #expect(update.only?.account != nil)  // The cycle still succeeded.
         #expect(update.failure?.stage == .supply)
-        #expect(update.only?.absence == nil)  // no denominator yet, so no guess
+        #expect(update.only?.absence == nil)  // No denominator yet, so no guess.
         #expect(update.only?.challenge != nil)
     }
 
-    /// The stale-supply reuse itself: a supply fetched once and then failing
-    /// to refresh keeps feeding the absence assessment, and with it the most
-    /// consequential alert the app raises.
+    /// A supply fetched once and then failing to refresh keeps feeding the
+    /// absence assessment, and with it the absence alerts.
     @Test("a failed supply refresh keeps the cached denominator")
     func failedSupplyRefreshKeepsCache() async throws {
         let stub = StubFetcher()
@@ -371,8 +377,8 @@ struct ChainPollerTests {
         clock.advance(301)
         let update = await poller.pollOnce()
 
-        // Two supply requests show the refresh was attempted, so the
-        // assessment below came from the cache rather than from a skipped fetch.
+        // Two supply requests show the refresh was attempted, so the assessment
+        // below came from the cache rather than from a skipped fetch.
         #expect(stub.requestCount(containing: "/v2/ledger/supply") == 2)
         #expect(update.failure?.stage == .supply)
         #expect(update.only?.absence == fresh)
@@ -505,22 +511,22 @@ struct ChainPollerTests {
         #expect(await message(status: 404) == noEndpoint)
     }
 
-    /// A seed is only meaningful for the window it was fetched for. Evaluating a
-    /// stale one manufactures a critical "challenged and not answered" for a
+    /// A seed is only meaningful for the window it was fetched for. Evaluating
+    /// a stale one manufactures a critical "challenged and not answered" for a
     /// window that closed long ago.
     @Test("a stale seed is not evaluated against a new challenge window")
     func staleSeedIsIgnored() async throws {
         let stub = StubFetcher()
         let clock = TestClock()
-        // Window 64,034,000, inside the 2x-grace enforcement bound. Address
-        // matches the seed, and lastSeen predates it.
+        // Window 64,034,000, inside the 2x-grace enforcement bound. The address
+        // matches the seed, and `lastSeen` predates the window.
         standardRoutes(stub, round: 64_034_300, seed: matchingSeed, lastSeen: 64_033_000)
         stub.route(
             "/v2/blocks/", json: JSONBuilder.blockHeader(round: 64_034_000, seed: matchingSeed))
         let poller = makePoller(stub: stub, clock: clock)
 
         let first = await poller.pollOnce()
-        #expect(first.only?.challenge?.isFailing == true)  // genuinely failing, this window
+        #expect(first.only?.challenge?.isFailing == true)  // Genuinely failing, in this window.
 
         // Cross into window 64,035,000, but the header fetch fails.
         standardRoutes(stub, round: 64_035_400, seed: matchingSeed, lastSeen: 64_033_000)
@@ -529,10 +535,13 @@ struct ChainPollerTests {
         let second = await poller.pollOnce()
 
         #expect(second.failure?.stage == .challengeSeed)
-        // No challenge state at all, rather than one derived from the old window.
+        // No challenge state at all, rather than one derived from the old
+        // window.
         #expect(second.only?.challenge == nil)
         #expect(!second.alerts.contains { $0.id == .challengeFailing })
     }
+
+    // MARK: - Lifecycle
 
     /// `stop()` finishes the stream permanently, so a later `start()` must not
     /// quietly poll forever while publishing nothing.
@@ -551,7 +560,7 @@ struct ChainPollerTests {
         #expect(stub.requestCount(containing: "/v2/accounts/") == 0)
     }
 
-    /// A manual refresh must publish. `pollOnce()` returns its Update to the
+    /// A manual refresh must publish. `pollOnce()` returns its `Update` to the
     /// caller and publishes nothing, so refreshing through it would spend
     /// requests, advance the round clock and record dispatcher cooldowns while
     /// the UI saw none of it.
@@ -612,6 +621,8 @@ struct ChainPollerTests {
         await poller.stop()
         #expect(accountRequests == 1)
     }
+
+    // MARK: - Challenge seed
 
     /// A 200 whose header lacks a seed must not stamp the window as fetched:
     /// that would silently disable challenge monitoring for the next ~1000
@@ -676,6 +687,31 @@ struct ChainPollerTests {
         #expect(update.only?.challenge?.isFailing == true)
     }
 
+    // MARK: - Notifications
+
+    /// With notifications off the dispatcher is not consulted at all: a
+    /// cooldown stamped for a notification nobody saw would swallow the first
+    /// real one after they are turned back on.
+    @Test("notifications off consumes no cooldowns")
+    func notificationsOffConsumesNoCooldown() async throws {
+        let stub = StubFetcher()
+        let clock = TestClock()
+        standardRoutes(stub, round: 64_030_160, seed: matchingSeed, lastSeen: 64_029_500)
+        let poller = makePoller(stub: stub, clock: clock, notificationsWanted: false)
+
+        let muted = await poller.pollOnce()
+        #expect(muted.alerts.contains { $0.id == .challengeFailing })
+        #expect(muted.notifications.isEmpty)
+        #expect(muted.alertHistory.isEmpty)
+
+        poller.setNotificationsWanted(true)
+        clock.advance(30)
+        let audible = await poller.pollOnce()
+        #expect(audible.notifications.contains { $0.id == .challengeFailing })
+    }
+
+    // MARK: - Rewards
+
     /// Before the indexer has answered once there is no rewards data, and zero
     /// blocks presented as data would misreport an account that proposed
     /// yesterday.
@@ -707,8 +743,8 @@ struct ChainPollerTests {
     }
 
     /// Blocks are immutable, so the second rewards fetch resumes past what is
-    /// already cached instead of re-downloading the whole 8-day window every
-    /// cycle.
+    /// already cached instead of re-downloading the whole 8-day window at every
+    /// fetch.
     @Test("rewards refetch resumes past the cached blocks")
     func rewardsRefetchIsIncremental() async throws {
         let stub = StubFetcher()
@@ -763,8 +799,9 @@ struct ChainPollerTests {
     }
 
     /// An indexer can run a round or two ahead of the algod backend that
-    /// answered. Its newest block is dropped for one cycle and counted at the
-    /// next rewards fetch, so a real proposal is never lost.
+    /// answered. A block past algod's round is dropped from that fetch and
+    /// counted at the next one, which resumes before it, so a real proposal is
+    /// never lost.
     @Test("a block from an indexer ahead of algod is counted once algod catches up")
     func earlyIndexerBlockIsCountedLater() async throws {
         let stub = StubFetcher()
@@ -812,29 +849,6 @@ struct ChainPollerTests {
         #expect(calls.last?.contains("min-round=\(UInt64.max)") == true)
     }
 
-    /// With notifications off the dispatcher is not consulted at all: a
-    /// cooldown stamped for a notification nobody saw would swallow the first
-    /// real one after they are turned back on.
-    @Test("notifications off consumes no cooldowns")
-    func notificationsOffConsumesNoCooldown() async throws {
-        let stub = StubFetcher()
-        let clock = TestClock()
-        standardRoutes(stub, round: 64_030_160, seed: matchingSeed, lastSeen: 64_029_500)
-        let poller = makePoller(stub: stub, clock: clock, notificationsWanted: false)
-
-        let muted = await poller.pollOnce()
-        #expect(muted.alerts.contains { $0.id == .challengeFailing })
-        #expect(muted.notifications.isEmpty)
-        #expect(muted.alertHistory.isEmpty)
-
-        poller.setNotificationsWanted(true)
-        clock.advance(30)
-        let audible = await poller.pollOnce()
-        #expect(audible.notifications.contains { $0.id == .challengeFailing })
-    }
-
-    // MARK: - Rewards
-
     @Test("rewards are summarised from the indexer")
     func rewards() async throws {
         let stub = StubFetcher()
@@ -880,16 +894,17 @@ struct ChainPollerTests {
         #expect(request.contains("proposers=\(Self.addressString)"))
     }
 
-    /// Exhausting the page budget must be reported. Results arrive oldest-first,
-    /// so a truncated fetch drops the newest proposals and the totals a busy
-    /// proposer sees would silently under-report.
+    /// Exhausting the page budget must be reported. Results arrive
+    /// oldest-first, so a truncated fetch drops the newest proposals and the
+    /// totals a busy proposer sees would silently under-report.
     @Test("exhausting the page budget is reported, not hidden")
     func truncationIsSurfaced() async throws {
         let stub = StubFetcher()
         let clock = TestClock()
         standardRoutes(stub, seed: nonMatchingSeed)
         let nowSeconds = Int64(clock.now.timeIntervalSince1970)
-        // Every page hands back another token, so the budget is always exhausted.
+        // Every page hands back another token, so the budget is always
+        // exhausted.
         stub.route(
             "/v2/block-headers",
             json: """
@@ -901,7 +916,7 @@ struct ChainPollerTests {
             makePoller(stub: stub, clock: clock, withIndexer: true), clock: clock)
 
         #expect(update.only?.rewards?.isTruncated == true)
-        #expect(stub.requestCount(containing: "/v2/block-headers") == 10)  // the page budget
+        #expect(stub.requestCount(containing: "/v2/block-headers") == 10)  // The page budget.
     }
 
     @Test("a complete fetch is not marked truncated")
@@ -1146,7 +1161,7 @@ struct ChainPollerTests {
             standardRoutes(stub, round: round, seed: nonMatchingSeed, lastSeen: round - 50)
             last = await poller.pollOnce()
             clock.advance(30)
-            round += 10  // 30 s of wall clock, 10 rounds → 3.0 s per round
+            round += 10  // 10 rounds in 30 s: 3.0 s per round.
         }
 
         let update = try #require(last)
@@ -1193,8 +1208,8 @@ struct ChainPollerTests {
     }
 
     /// Three rounds in eight seconds is no measurement, and taking it as one
-    /// moved every countdown by several percent. The next poll measures from
-    /// the poll before the refresh instead.
+    /// would move every countdown by several percent. The next poll measures
+    /// from the poll before the refresh instead.
     @Test("a refresh seconds after a poll leaves the round time alone")
     func refreshKeepsRoundTime() async throws {
         let stub = StubFetcher()
@@ -1274,7 +1289,8 @@ struct ChainPollerTests {
     // MARK: - Several accounts
 
     /// A further valid address, derived rather than written out, so a second
-    /// account costs no more 58-character literals and the checksum still holds.
+    /// account costs no more 58-character literals and the checksum still
+    /// holds.
     static func filledAddress(_ byte: UInt8) -> AlgorandAddress {
         let key = [UInt8](repeating: byte, count: AlgorandAddress.publicKeyLength)
         return try! AlgorandAddress(
@@ -1344,8 +1360,8 @@ struct ChainPollerTests {
         #expect(update.entries.allSatisfy { $0.absence != nil })
         #expect(update.entries.allSatisfy { $0.keyExpiry != nil })
         #expect(update.failure == nil)
-        // The denominator and the seed are shared, so a second account costs one
-        // more request rather than three.
+        // The denominator and the seed are shared, so a second account costs
+        // one more request rather than three.
         #expect(stub.requestCount(containing: "/v2/accounts/") == 2)
         #expect(stub.requestCount(containing: "/v2/ledger/supply") == 1)
         #expect(stub.requestCount(containing: "/v2/blocks/64030000") == 1)
@@ -1361,7 +1377,8 @@ struct ChainPollerTests {
         let clock = TestClock()
         let second = Self.filledAddress(0x11)
         let third = Self.filledAddress(0x12)
-        // Six tenths of the allowable lag, so the headroom is low but not near.
+        // Last seen six tenths of the allowable lag ago, so the headroom is low
+        // and the limit not yet near.
         accountRoute(stub, address, lastSeen: 64_030_100 - 151_213)
         accountRoute(stub, second, status: "Offline")
         accountRoute(stub, third, status: "Offline")
@@ -1407,7 +1424,7 @@ struct ChainPollerTests {
         let stub = StubFetcher()
         let clock = TestClock()
         let second = Self.filledAddress(0x11)
-        accountRoute(stub, address)  // the second address has no route, so it 404s
+        accountRoute(stub, address)  // The second address has no route, so it gets a 404.
         sharedRoutes(stub)
         let poller = makePoller(stub: stub, clock: clock, addresses: [address, second])
 
@@ -1437,7 +1454,7 @@ struct ChainPollerTests {
         #expect(update.entries.count == 2)
         #expect(update.entries.allSatisfy { $0.failure?.stage == .account })
         #expect(update.failure?.stage == .account)
-        #expect(await poller.nextDelay == 5)  // now the shared backoff engages
+        #expect(await poller.nextDelay == 5)  // Now the shared backoff engages.
     }
 
     /// One dropped request for one account must not make it look healthy. Its
@@ -1537,7 +1554,8 @@ struct ChainPollerTests {
         clock.advance(30)
         #expect(unavailable(await poller.pollOnce()) == nil)
 
-        // A new failure starts its own count rather than inheriting the old one.
+        // A new failure starts its own count rather than inheriting the old
+        // one.
         stub.route("/v2/accounts/\(second.stringValue)", status: 503, json: "{}")
         clock.advance(30)
         #expect(unavailable(await poller.pollOnce()) == nil)
@@ -1593,7 +1611,7 @@ struct ChainPollerTests {
         let stub = StubFetcher()
         let clock = TestClock()
         let second = Self.filledAddress(0x11)
-        accountRoute(stub, address)  // the second address has no route, so it 404s
+        accountRoute(stub, address)  // The second address has no route, so it gets a 404.
         sharedRoutes(stub)
 
         let oneAccount = await makePoller(stub: stub, clock: clock, addresses: [address, second])
@@ -1632,11 +1650,11 @@ struct ChainPollerTests {
         let update = await poller.pollOnce()
 
         #expect(update.notifications.map(\.address) == [second])
-        #expect(update.alerts.count == 2)  // both conditions still hold
+        #expect(update.alerts.count == 2)  // Both conditions still hold.
         #expect(update.alerts.allSatisfy { $0.id == .accountOffline })
     }
 
-    /// Blocks are immutable, so each account resumes from the newest round
+    /// Blocks are immutable, so each account resumes past the newest round
     /// already cached for it, which is a different round for every account.
     @Test("each account's rewards query resumes from its own cached round")
     func rewardsResumePerAddress() async throws {

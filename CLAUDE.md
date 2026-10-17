@@ -9,7 +9,7 @@ algobuddy is a macOS menu bar app that watches one or more Algorand participatio
 
 ## The gate
 
-`make check` runs the linter and the full test suite, and is the single bar every change must clear. Run it, and iterate until it passes, before proposing anything.
+`make check` runs the linter, the release build and the full test suite, and is the single bar every change must clear. Run it, and iterate until it passes, before proposing anything.
 
 - Never delete, skip, or weaken a test to make the suite pass. A failing test is a finding, not an obstacle.
 - `make install` builds and installs the app bundle; `make bundle` assembles it. Neither is needed to validate a logic change.

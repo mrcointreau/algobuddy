@@ -30,22 +30,24 @@ public struct ChallengeState: Sendable, Equatable {
     }
 }
 
-/// Mirrors `FindChallenge` / `bitsMatch` in go-algorand `ledger/apply/challenge.go`.
+/// Mirrors `FindChallenge` / `bitsMatch` in go-algorand
+/// `ledger/apply/challenge.go`.
 ///
-/// Every `challengeInterval` rounds a challenge is drawn from that block's seed.
-/// An account is challenged when the leading `challengeBits` of its public key
-/// match the leading bits of the seed. With `challengeBits == 5`, roughly one
-/// online account in 32 per interval. It must then have proposed or heartbeated
-/// by `challengeRound + challengeGracePeriod`.
+/// Every `challengeInterval` rounds a challenge is drawn from that block's
+/// seed. An account is challenged when the leading `challengeBits` of its
+/// public key match the leading bits of the seed. With `challengeBits == 5`,
+/// roughly one online account in 32 per interval. It must then have proposed or
+/// heartbeated by `challengeRound + challengeGracePeriod`.
 ///
 /// The whole computation is local: one block header plus the account record, no
 /// node access and no credentials. algod normally answers challenges by itself,
-/// so a firing alert here means the node is down or its heartbeat service is
-/// broken, and at 200 rounds the user has roughly nine minutes.
+/// so a challenge still unanswered late in the 200-round grace period, roughly
+/// nine minutes, means the node is down or its heartbeat service is broken.
 public enum Challenge {
 
-    /// The most recent challenge round, if challenges have begun. It names spent challenges too;
-    /// `evaluate` decides whether the challenge is still in force.
+    /// The most recent challenge round, if challenges have begun. It names
+    /// spent challenges too; `evaluate` decides whether the challenge is still
+    /// in force.
     public static func challengeRound(for currentRound: UInt64, params: ConsensusParams) -> UInt64?
     {
         let interval = params.challengeInterval
@@ -78,7 +80,7 @@ public enum Challenge {
             isChallenged: challenged,
             hasAnswered: answered,
             // Clamping, not trapping: rounds are decoded from a user-configured
-            // endpoint, and a garbage value above Int64.max must degrade the
+            // endpoint, and a garbage value above `Int64.max` must degrade the
             // countdown, not crash the poller.
             roundsUntilDeadline: Int64(clamping: deadline) - Int64(clamping: currentRound)
         )
@@ -86,7 +88,8 @@ public enum Challenge {
 
     /// True when the first `n` bits of both byte sequences are equal.
     ///
-    /// Ported from `bitsMatch`; only ever called with small `n` (5 today).
+    /// Ported from `bitsMatch`. Called with `challengeBits`, which consensus
+    /// v40 sets to 5.
     public static func bitsMatch(_ a: [UInt8], _ b: [UInt8], _ n: Int) -> Bool {
         guard n >= 0 else { return false }
         let fullBytes = n / 8

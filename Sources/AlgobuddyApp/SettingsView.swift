@@ -3,8 +3,9 @@ import SwiftUI
 
 /// First run, shown in the panel. The whole setup is one field.
 ///
-/// algobuddy needs no node, no token and no account, which is the point: the app
-/// should be useful before the user has been asked to trust it with anything.
+/// algobuddy needs no node, no token and no account, which is the point: the
+/// app should be useful before the user has been asked to trust it with
+/// anything.
 struct OnboardingView: View {
     @Bindable var model: AppModel
     @FocusState private var focused: AddressDraft.ID?
@@ -29,9 +30,9 @@ struct OnboardingView: View {
                 isMasked: model.valuesHidden
             ) { model.apply() }
 
-            // Without this, a bad stored URL would make Start a silent no-op:
-            // the panel has no URL fields, so the reason, and the pane that
-            // holds them, has to be said here.
+            // Without this, a bad URL in the Data Source pane would make Start
+            // a silent no-op: the panel has no URL fields, so the reason, and
+            // the pane that holds them, has to be said here.
             if let error = model.sourceError {
                 Text("\(error) Fix it in Settings (⌘,), under Data Source.")
                     .font(Typography.secondary).foregroundStyle(.red)
@@ -174,9 +175,9 @@ private struct AccountsPane: View {
             ForEach($model.addressDrafts) { $draft in
                 // A box for each account keeps each name with its own address.
                 Section {
-                    // The labels in a column of their own and each field
-                    // filling the rest, as in the Data Source pane, so the
-                    // fields keep one width whatever is typed.
+                    // The labels in a column of their own, as in the Data
+                    // Source pane, so the fields line up and keep their widths
+                    // whatever is typed.
                     Grid(
                         alignment: .leadingFirstTextBaseline, horizontalSpacing: 8,
                         verticalSpacing: 4
@@ -234,9 +235,9 @@ private struct AccountsPane: View {
                             }
 
                             // The consequence, said plainly, in place of a
-                            // limit nobody asked for. Nothing else about the
-                            // app changes with the count: the same two hosts
-                            // are contacted whatever it is.
+                            // limit nobody asked for. No other cost grows with
+                            // the count: the same two hosts are contacted
+                            // whatever it is.
                             Text(
                                 "Every account adds a request to each poll, and a poll runs about every 30 s."
                             )
@@ -256,9 +257,10 @@ private struct AccountsPane: View {
                 }
             }
         }
-        // Leaving a row commits it, the same contract as the URL fields;
-        // apply() never tears down a running watch over an invalid or empty
-        // draft, so this is always safe.
+        // Leaving a row commits it, the same contract as the URL fields.
+        // `apply()` keeps the account a half-typed row held, so a commit
+        // mid-edit drops nothing, while a cleared row removes its account, as
+        // clearing is meant to.
         .onChange(of: focused) { old, _ in
             if old != nil { model.apply() }
         }
@@ -325,17 +327,17 @@ private struct DataSourcePane: View {
                 // Stated plainly rather than buried: this is the one privacy
                 // trade the default configuration makes.
                 Text(
-                    "A public provider sees which address you watch and how often. Point these at your own node to avoid that."
+                    "A public provider sees which addresses you watch and how often. Point these at your own node to avoid that. algobuddy sends no token, so the node must serve the API without one."
                 )
                 .font(Typography.secondary).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
             }
         }
-        // Leaving a field commits it, the same contract as AddressField: an
-        // edit abandoned by clicking elsewhere must not sit in the bound text
-        // diverging from what the poller runs. apply() ignores a commit that
-        // changes nothing and never tears down a running watch over an invalid
-        // draft, so focus movement is always safe.
+        // Leaving a field commits it, the same contract as the Accounts pane's
+        // rows: an edit abandoned by clicking elsewhere must not sit in the
+        // bound text diverging from what the poller runs. `apply()` ignores a
+        // commit that changes nothing and never tears down a running watch over
+        // an invalid draft, so focus movement is always safe.
         .onChange(of: focusedURL) { old, _ in
             if old != nil { model.apply() }
         }
@@ -365,7 +367,8 @@ private struct PaneLayout: ViewModifier {
 /// A text field's label, set in a column of its own beside the field.
 ///
 /// The field keeps its own label, hidden on screen, and that is the one
-/// VoiceOver reads, so this one is hidden from VoiceOver rather than read twice.
+/// VoiceOver reads, so this one is hidden from VoiceOver rather than read
+/// twice.
 private struct FieldLabel: View {
     let title: String
 
@@ -545,12 +548,13 @@ struct VersionFooter: View {
                 Button("Check for Updates") { model.checkForUpdates() }
                     .disabled(model.isCheckingForUpdates)
                 if model.isCheckingForUpdates {
-                    // A spinner beside the control it belongs to, and unlabelled:
-                    // on macOS the indicator itself says that work is in flight,
-                    // and a word next to it repeats what the dimmed button has
-                    // already said. The accessibility label is not shown, and
-                    // exists because a bare indicator otherwise announces
-                    // nothing about what is being waited on.
+                    // A spinner beside the control it belongs to, and
+                    // unlabelled: on macOS the indicator itself says that work
+                    // is in flight, and a word next to it repeats what the
+                    // dimmed button has already said. The accessibility label
+                    // is not shown, and exists because a bare indicator
+                    // otherwise announces nothing about what is being waited
+                    // on.
                     ProgressView()
                         .controlSize(.small)
                         .accessibilityLabel("Checking for updates.")
@@ -559,8 +563,8 @@ struct VersionFooter: View {
                 }
             }
 
-            // The same disclosure the Data Source pane makes: the one place
-            // this pane reaches a host the user did not configure.
+            // A disclosure like the Data Source pane's: the one place this pane
+            // reaches a host the user did not configure.
             Text("The check contacts github.com, and only when you click.")
                 .font(Typography.secondary)
                 .foregroundStyle(.secondary)
@@ -642,8 +646,8 @@ struct NotificationsRow: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            // Checkbox, not a switch: switches are the iOS idiom, and macOS
-            // settings use checkboxes.
+            // A checkbox, not a switch. HIG: "To present a single setting that
+            // can be on or off, prefer a checkbox."
             Toggle(
                 "Notify on alerts",
                 isOn: Binding(
@@ -716,9 +720,9 @@ struct LaunchAtLoginRow: View {
 
 /// Validates as you type, using the same checksum the protocol uses.
 ///
-/// A transposed character produces a well-formed address for an account that
-/// isn't yours, which would otherwise show a permanently healthy panel while
-/// the real account went unwatched.
+/// One mistyped character leaves a well-formed address that algod refuses with
+/// a bare 400, so the field reports the mistake as it is typed, where it can be
+/// fixed.
 struct AddressField: View {
     @Binding var draft: AddressDraft
     var focus: FocusState<AddressDraft.ID?>.Binding

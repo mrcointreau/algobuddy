@@ -62,7 +62,7 @@ Everything lives in Settings (⌘,), in four panes, and the window reopens on th
 - **General**: open at login, notifications (on by default), the running build, and a manual check for a newer release
 - **Accounts**: the addresses to watch, added and removed a row at a time, each with an optional name of up to 32 characters. There's no limit on how many; each one adds a request to every poll. With more than one, the panel lists them with their totals, and each opens its own page. A name labels its account in the panel and in notifications, and stays visible when values are hidden (⌘P). Names are stored on your Mac and never sent anywhere
 - **Menu Bar**: which metrics to show, with a live width estimate. A wide menu bar item isn't shortened on a notched display, it's hidden entirely
-- **Data Source**: algod and indexer URLs, defaulting to a public provider. Point them at your own node if you'd rather not have a third party see which addresses you watch
+- **Data Source**: algod and indexer URLs, defaulting to a public provider. Point them at your own node if you'd rather not have a third party see which addresses you watch. algobuddy sends no token, so your node must serve the API without one, as public providers do
 
 ## What it deliberately doesn't do
 

@@ -18,7 +18,8 @@ public struct URLSessionFetcher: HTTPFetching {
         for (field, value) in headers { request.setValue(value, forHTTPHeaderField: field) }
         let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse else { throw AlgodError.notHTTP }
-        // A redirect the session refused arrives as the redirect response itself.
+        // A redirect the session refused arrives as the redirect response
+        // itself.
         if Self.isRefusedRedirect(http) { throw AlgodError.redirectRefused }
         return (data, http.statusCode)
     }
@@ -28,10 +29,11 @@ public struct URLSessionFetcher: HTTPFetching {
     /// - No HTTP cache and no cookies: request URLs name the watched addresses,
     ///   and nothing about them is worth keeping on disk.
     /// - A deadline for the whole request, not only for each silence: a server
-    ///   that trickles a byte every few seconds would otherwise hold a poll open
-    ///   indefinitely, and every later poll with it.
+    ///   that trickles a byte every few seconds would otherwise hold a poll
+    ///   open indefinitely, and every later poll with it.
     /// - A redirect only within the host that was asked, and never from https
-    ///   down to http, so the configured hosts stay the only ones contacted.
+    ///   down to http, so a request never reaches a host other than the one it
+    ///   was made to.
     /// - A plain user agent, which names the app and not the system.
     public static let privateSession: URLSession = {
         let configuration = URLSessionConfiguration.ephemeral
@@ -77,13 +79,13 @@ final class RedirectGuard: NSObject, URLSessionTaskDelegate, Sendable {
     }
 }
 
-/// Joins an API path onto a base URL **without discarding the base's own path**.
+/// Joins an API path onto a base URL **without discarding the base's own
+/// path**.
 ///
 /// `URL(string: "/v2/status", relativeTo: "https://host/algod")` resolves to
 /// `https://host/v2/status`, because an absolute-path reference replaces the
-/// base path entirely, per RFC 3986. Any deployment that mounts algod behind a reverse
-/// proxy at a sub-path would silently 404 on every request, and the resulting
-/// error blames the user's address rather than the URL.
+/// base path entirely, per RFC 3986. An algod mounted behind a reverse proxy at
+/// a sub-path would then answer every request with a 404.
 enum Endpoint {
     static func resolve(_ path: String, against base: URL) -> URL {
         guard var components = URLComponents(url: base, resolvingAgainstBaseURL: false) else {
@@ -96,7 +98,8 @@ enum Endpoint {
             : components.path
 
         components.path = prefix + String(halves[0])
-        // Already percent-encoded by the callers, which build their own queries.
+        // Already percent-encoded by the callers, which build their own
+        // queries.
         components.percentEncodedQuery = halves.count > 1 ? String(halves[1]) : nil
         return components.url ?? base
     }
@@ -131,9 +134,10 @@ extension AlgodError {
 /// Client for the three algod endpoints algobuddy reads.
 ///
 /// The token is optional and, against a public API provider, unnecessary, since
-/// those serve these endpoints unauthenticated. It exists so the same client can point
-/// at an algod that does require one. A 401 surfaces as `.unauthorized` rather
-/// than empty data, so the cause is visible instead of looking like an outage.
+/// those serve these endpoints unauthenticated. It exists so the same client
+/// can point at an algod that does require one. A 401 surfaces as
+/// `.unauthorized` rather than empty data, so the cause is visible instead of
+/// looking like an outage.
 public struct AlgodClient: Sendable {
     public let baseURL: URL
     public let token: String?
@@ -186,11 +190,11 @@ public struct AlgodClient: Sendable {
     }
 }
 
-/// Client for an Algorand indexer, used only to backfill proposal history.
+/// Client for an Algorand indexer, used only for proposal history.
 ///
-/// Everything algobuddy shows live comes from algod; this exists so that a
-/// freshly installed app can display "earned this week" instead of starting
-/// from zero.
+/// Every other figure comes from algod. The indexer is what lets a freshly
+/// installed app show the past seven days of proposals at once, instead of
+/// starting from zero.
 public struct IndexerClient: Sendable {
     public let baseURL: URL
     private let fetcher: HTTPFetching

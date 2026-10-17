@@ -26,8 +26,8 @@ struct ReleaseVersion: Comparable, Equatable, Sendable {
         let core = body.split(separator: "-", maxSplits: 1, omittingEmptySubsequences: false)[0]
         let parts = core.split(separator: ".", omittingEmptySubsequences: false)
         guard parts.count == 3 else { return nil }
-        // `Int` accepts underscores, a leading sign and non-ASCII digits, none
-        // of which belong in a version, so the characters are checked first.
+        // `Int` accepts a leading sign, which does not belong in a version, so
+        // only ASCII digits pass.
         let numbers = parts.compactMap { part -> Int? in
             guard !part.isEmpty, part.allSatisfy({ $0.isASCII && $0.isNumber }) else { return nil }
             return Int(part)

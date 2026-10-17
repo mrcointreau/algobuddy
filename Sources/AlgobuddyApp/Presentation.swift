@@ -9,12 +9,11 @@ enum HealthLevel: Int, Comparable {
 
     /// Distinct **shapes**, not just distinct colours.
     ///
-    /// Confirmed on macOS 26: the menu bar renders this label as a template
-    /// image and strips the tint entirely: a warning shows as a *white*
-    /// triangle, not an orange one. The symbol therefore has to carry the whole
-    /// signal, which is also what makes it readable to anyone who cannot
-    /// distinguish the colours. The tint below still applies in the panel's
-    /// account rows, which are not templated.
+    /// The menu bar item is a template image, drawn by `MenuBarImage`, so it
+    /// takes the menu bar's own colour and shows no tint. The symbol therefore
+    /// has to carry the whole signal, which is also what makes it readable to
+    /// anyone who cannot distinguish the colours. The tint below applies in the
+    /// panel's account rows, which are not templated.
     var symbol: String {
         switch self {
         case .unknown: "circle.dotted"
@@ -80,11 +79,11 @@ enum Typography {
 
 /// The panel's vertical rhythm.
 ///
-/// With a single type size, spacing is what separates one group from the next.
-/// The rule that matters: `heading` is deliberately tighter than `group`, so a
-/// heading binds to the rows beneath it rather than floating between them. HIG
-/// lists negative space first among the ways to "group related items", ahead of
-/// separator lines.
+/// With headings at the content's own size, spacing is what separates one group
+/// from the next. The rule that matters: `heading` is deliberately tighter than
+/// `group`, so a heading binds to the rows beneath it rather than floating
+/// between them. HIG lists negative space first among the ways to "group
+/// related items", ahead of separator lines.
 enum Spacing {
     /// Between top-level groups.
     static let group: CGFloat = 18
@@ -96,7 +95,7 @@ enum Spacing {
     static let edge: CGFloat = 14
 }
 
-/// Whether the panel and menu bar mask the address and ALGO amounts.
+/// Whether the panel masks the addresses and ALGO amounts.
 ///
 /// An environment value rather than a parameter threaded into each card: a
 /// default-false parameter makes omission compile silently, so a new card that
@@ -137,10 +136,11 @@ extension EnvironmentValues {
 enum MeterLevel {
     case normal, caution, critical
 
-    /// The one severity-to-level translation for the panel's rows and
-    /// Attention entries, so a retuned tint or symbol changes all of them at
-    /// once instead of leaving a hardcoded copy behind. The menu bar icon and
-    /// the Settings preview grade severities separately, through `HealthLevel`.
+    /// The one severity-to-level translation for the panel's rows and Attention
+    /// entries, so a retuned tint or symbol changes all of them at once instead
+    /// of leaving a hardcoded copy behind. The menu bar icon, the Settings
+    /// preview and the glyph on each account's row in the panel's list grade
+    /// severities separately, through `HealthLevel`.
     init(_ severity: AlertSeverity?) {
         switch severity {
         case .critical: self = .critical
@@ -257,8 +257,8 @@ enum MenuBar {
 }
 
 enum Format {
-    /// Stand-in for a value the reader has chosen not to display. Bullets keep a
-    /// row looking like a row, where a word such as "hidden" would read as a
+    /// Stand-in for a value the reader has chosen not to display. Bullets keep
+    /// a row looking like a row, where a word such as "hidden" would read as a
     /// status and invite the question of what went wrong.
     static func hidden(_ length: Int = 6) -> String { String(repeating: "•", count: length) }
 
@@ -298,8 +298,10 @@ enum Format {
         names.label(for: address, otherwise: addressLabel(address.stringValue, hidden: hidden))
     }
 
-    /// Compact and, crucially, **fixed width**. A menu bar item that grows a
-    /// character every few seconds shoves everything to its left around.
+    /// Compact, and steady: above a million it changes once in 10,000 rounds.
+    /// The full round changes every few seconds, and in the menu bar's
+    /// proportional digits each change would shove everything to its left
+    /// around.
     static func round(_ value: UInt64) -> String {
         if value >= 1_000_000 {
             return String(format: "%.2fM", Double(value) / 1_000_000)
@@ -346,10 +348,10 @@ enum Format {
 }
 
 extension AccountState {
-    /// Online, earning and overall health as one phrase, shared by the
-    /// account's card and its row in the list, so the two cannot word the same
-    /// state two ways. "Earning" follows the alerts: an account outside the
-    /// payout window does not earn, however eligible it is.
+    /// The participation status and whether proposing pays, as one phrase,
+    /// shared by the account's card and its row in the list, so the two cannot
+    /// word the same state two ways. "Earning" follows the alerts: an account
+    /// outside the payout window does not earn, however eligible it is.
     var statusText: String {
         switch status {
         case .online: earnsPayouts() ? "Online and earning" : "Online, not earning"
@@ -377,10 +379,10 @@ struct RowHighlight: ViewModifier {
         content
             // Without this the row only responds where there is ink.
             .contentShape(Rectangle())
-            // `.quaternary` rather than a hand-picked `Color.primary.opacity(0.09)`:
-            // the hierarchical styles have vibrant variants and respond to Increase
-            // Contrast and Reduce Transparency. A fixed alpha over a material does
-            // neither, and the panel sits on a material.
+            // `.quaternary`, a hierarchical style: those have vibrant variants
+            // and respond to Increase Contrast and Reduce Transparency, where a
+            // fixed alpha over a material does neither, and the panel sits on a
+            // material.
             .background(
                 RoundedRectangle(cornerRadius: 5)
                     .fill(

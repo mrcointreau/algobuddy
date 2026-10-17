@@ -6,8 +6,8 @@ import Testing
 @Suite("Absenteeism")
 struct AbsenceTests {
     // Live mainnet values captured at round 64,030,276.
-    static let accountStake = MicroAlgos(149_734_756_595)  // ≈ 149,734.76 ALGO
-    static let totalOnlineStake = MicroAlgos(1_886_826_685_238_820)  // ≈ 1.887B ALGO
+    static let accountStake = MicroAlgos(149_734_756_595)  // About 149,734.76 ALGO.
+    static let totalOnlineStake = MicroAlgos(1_886_826_685_238_820)  // About 1.887B ALGO.
     static let lastSeen: UInt64 = 64_030_256
     static let currentRound: UInt64 = 64_030_276
 
@@ -21,14 +21,15 @@ struct AbsenceTests {
                 currentRound: Self.currentRound,
                 params: .v40))
 
-        // 20 × 1,886,826,685,238,820 / 149,734,756,595 = 252,022
+        // 20 × 1,886,826,685,238,820 / 149,734,756,595 is 252,022.54, which
+        // `muldiv` rounds down to 252,022.
         #expect(assessment.allowableLag == 252_022)
         #expect(assessment.roundsSinceLastSeen == 20)
         #expect(assessment.headroomRounds == 252_002)
         #expect(!assessment.isAbsent)
         #expect(assessment.ratio < 0.001)
 
-        // ≈ 8.2 days at nominal round time.
+        // About 8.2 days at the nominal round time.
         let days = assessment.headroom(roundTime: 2.8) / 86_400
         #expect(days > 8.0 && days < 8.4)
     }
@@ -74,13 +75,16 @@ struct AbsenceTests {
                 lastSeen: 1_000,
                 currentRound: 1_000 + 252_022,
                 params: .v40))
-        // Source condition is `lastSeen + allowableLag < current`, so equality passes.
+        // go-algorand's condition is `lastSeen + allowableLag < current`, so an
+        // account exactly at the limit is not absent yet.
         #expect(!assessment.isAbsent)
     }
 
-    /// go-algorand explicitly treats a never-seen account as not absent, rather
-    /// than as maximally overdue. Getting this backwards would fire a critical
-    /// alert at every freshly registered account.
+    /// go-algorand exempts an account never seen, one online since before
+    /// payouts began, rather than treating it as maximally overdue, and exempts
+    /// a zero stake, which has no expected interval between proposals. Getting
+    /// either backwards would fire a critical alert at an account the protocol
+    /// does not count as absent.
     @Test(
         "never-seen and zero-stake accounts are exempt",
         arguments: [
@@ -99,7 +103,8 @@ struct AbsenceTests {
 
     @Test("a dust-sized stake overflows the lag bound and is skipped")
     func hugeLag() {
-        // allowableLag would exceed UInt32.max, which source treats as not absent.
+        // `allowableLag` would exceed `UInt32.max`, which go-algorand treats as
+        // not absent.
         #expect(
             Absence.assess(
                 accountStake: MicroAlgos(1),
@@ -110,7 +115,7 @@ struct AbsenceTests {
     }
 
     /// Rounds come from a user-configured endpoint: a garbage current round
-    /// near UInt64.max must degrade the numbers, never trap.
+    /// near `UInt64.max` must degrade the numbers, never trap.
     @Test("absurd rounds clamp instead of trapping")
     func absurdRoundsClamp() throws {
         let assessment = try #require(
@@ -126,8 +131,8 @@ struct AbsenceTests {
 
     /// A supply endpoint reporting zero online stake drives `allowableLag` to
     /// zero without tripping the overflow guard, so `ratio` must still honour
-    /// its documented scale rather than reporting a healthy account as "just
-    /// seen" while `isAbsent` fires the critical alert.
+    /// its documented scale rather than read 0, as if just seen, while
+    /// `isAbsent` fires the critical alert.
     @Test("zero allowable lag keeps ratio consistent with isAbsent")
     func zeroAllowableLag() throws {
         let seenThisRound = try #require(

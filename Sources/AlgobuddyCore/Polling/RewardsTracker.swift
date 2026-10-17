@@ -6,15 +6,15 @@ public struct RewardsSummary: Sendable, Equatable {
     public var proposals7d = 0
     public var earned24h = MicroAlgos.zero
     public var earned7d = MicroAlgos.zero
-    /// Blocks proposed in the last 7 days that paid nothing, because the account
-    /// was not eligible or balance sat outside the payout window. Scoped to the
-    /// widest span the summary itself shows, so the count can never exceed the
-    /// 7-day proposal figure it is presented beside.
+    /// Blocks proposed in the last 7 days that paid nothing, because the
+    /// account was not eligible or balance sat outside the payout window.
+    /// Scoped to the widest span the summary itself shows, so the count can
+    /// never exceed the 7-day proposal figure it is presented beside.
     public var unpaidProposals = 0
     /// The indexer had more pages than the fetch was willing to read, so these
     /// totals are a floor rather than the whole window. Surfaced instead of
-    /// silently truncated, because a bounded fetch that presents itself as complete
-    /// is worse than one that admits the bound.
+    /// silently truncated, because a bounded fetch that presents itself as
+    /// complete is worse than one that admits the bound.
     public var isTruncated = false
 
     public init() {}
@@ -23,9 +23,9 @@ public struct RewardsSummary: Sendable, Equatable {
 /// Accumulates proposed blocks fetched from an indexer.
 ///
 /// Live monitoring never needs this. It exists so a freshly installed app can
-/// show "earned this week" instead of starting from zero. Deriving it from the
-/// indexer rather than polling every block header keeps this to a handful of
-/// requests per hour against a public endpoint.
+/// show the past seven days of proposals instead of starting from zero.
+/// Deriving it from the indexer rather than polling every block header keeps
+/// this to a handful of requests per hour against a public endpoint.
 public struct RewardsTracker: Sendable, Equatable {
     private var blocks: [UInt64: IndexerClient.ProposedBlock] = [:]
 

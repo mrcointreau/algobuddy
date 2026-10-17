@@ -33,7 +33,7 @@ public struct PortfolioSummary: Sendable, Equatable {
     public var earned24h = MicroAlgos.zero
     public var earned7d = MicroAlgos.zero
     /// Whether any account has reported a proposal history at all. The sums
-    /// below read as zero both before the first indexer answer and for a
+    /// above read as zero both before the first indexer answer and for a
     /// portfolio that has genuinely proposed nothing, and only this tells the
     /// two apart, so a surface can stay silent rather than claim "0 blocks".
     public var hasRewards = false

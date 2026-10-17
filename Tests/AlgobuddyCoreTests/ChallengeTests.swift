@@ -12,9 +12,9 @@ struct ChallengeTests {
 
     @Test("compares only the leading n bits")
     func leadingBits() {
-        #expect(Challenge.bitsMatch([0xFF], [0xF8], 5))  // top 5 bits both 11111
-        #expect(!Challenge.bitsMatch([0xFF], [0xF0], 5))  // differ in bit 4
-        #expect(Challenge.bitsMatch([0x00], [0x07], 5))  // low 3 bits ignored
+        #expect(Challenge.bitsMatch([0xFF], [0xF8], 5))  // The top 5 bits are both 11111.
+        #expect(!Challenge.bitsMatch([0xFF], [0xF0], 5))  // They differ in bit 4.
+        #expect(Challenge.bitsMatch([0x00], [0x07], 5))  // The low 3 bits are ignored.
         #expect(Challenge.bitsMatch([0xAB, 0xCD], [0xAB, 0xFF], 8))
         #expect(!Challenge.bitsMatch([0xAB, 0xCD], [0xAC, 0xCD], 8))
     }
@@ -62,7 +62,7 @@ struct ChallengeTests {
                 seed: Self.matchingSeed(),
                 challengeRound: 64_030_000,
                 currentRound: 64_030_100,
-                lastSeen: 64_029_500,  // before the challenge
+                lastSeen: 64_029_500,  // Before the challenge.
                 params: .v40))
 
         #expect(state.isChallenged)

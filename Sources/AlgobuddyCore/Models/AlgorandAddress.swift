@@ -6,9 +6,9 @@ import Foundation
 /// bytes: a 32-byte Ed25519 public key followed by a 4-byte checksum, which is
 /// the last 4 bytes of `SHA-512/256(publicKey)`.
 ///
-/// Validating the checksum matters more here than it looks: a mistyped address
-/// silently monitors an account that does not exist, and the user would see a
-/// permanently healthy-looking dashboard for a node that is actually suspended.
+/// Validating the checksum locally matters: one mistyped character leaves a
+/// well-formed address that algod refuses with a bare 400, so the mistake is
+/// caught where it is typed instead.
 public struct AlgorandAddress: Hashable, Sendable {
     public static let stringLength = 58
     public static let publicKeyLength = 32

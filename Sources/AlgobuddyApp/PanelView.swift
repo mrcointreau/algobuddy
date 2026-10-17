@@ -872,34 +872,53 @@ struct AccountRow: View {
     }
 
     private func row(now: Date) -> some View {
-        Button(action: open) {
+        let age = staleText(now: now)
+        return Button(action: open) {
             HStack(spacing: 8) {
                 Image(systemName: health.symbol)
                     .font(Typography.secondary)
                     .foregroundStyle(health.tint)
                     .frame(width: 14)
 
-                VStack(alignment: .leading, spacing: 1) {
-                    title
-                    facts(now: now).font(Typography.secondary)
-                }
-
-                Spacer()
-
-                if let account = entry.account {
-                    // The widest amount a row shows holds the column, never
-                    // drawn, so the facts beside it have the same room whatever
-                    // the amount and whether values are hidden, and the row
-                    // keeps its height when values are hidden.
-                    ZStack(alignment: .trailing) {
-                        Text(algos: Format.widestRowAmount, style: .subheadline).hidden()
-                        Text(
-                            algos: Format.rowAlgosLabel(account.amount, hidden: isHidden),
-                            style: .subheadline)
+                // In a stale row the two columns share their last baseline, so
+                // the age stands on the line of the facts. A fresh row keeps
+                // its stake centred.
+                HStack(alignment: age == nil ? .center : .lastTextBaseline, spacing: 8) {
+                    VStack(alignment: .leading, spacing: 1) {
+                        title
+                        facts.font(Typography.secondary)
                     }
-                    .font(Typography.secondary.monospacedDigit())
-                    .foregroundStyle(.secondary)
+
+                    Spacer()
+
+                    if let account = entry.account {
+                        VStack(alignment: .trailing, spacing: 1) {
+                            // The widest amount a row shows holds the column,
+                            // never drawn, so the facts beside it have the same
+                            // room whatever the amount and whether values are
+                            // hidden, and the row keeps its height when values
+                            // are hidden.
+                            ZStack(alignment: .trailing) {
+                                Text(algos: Format.widestRowAmount, style: .subheadline)
+                                    .hidden()
+                                Text(
+                                    algos: Format.rowAlgosLabel(account.amount, hidden: isHidden),
+                                    style: .subheadline)
+                            }
+                            .font(Typography.secondary.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                            // Under the stake rather than after the facts, which
+                            // leave no room for it: there it would wrap onto a
+                            // line of its own and grow the row.
+                            if let age {
+                                Text(age)
+                                    .font(Typography.secondary)
+                                    .foregroundStyle(.orange)
+                            }
+                        }
+                    }
                 }
+
                 Image(systemName: "chevron.right")
                     .font(Typography.secondary)
                     .foregroundStyle(.tertiary)
@@ -931,7 +950,7 @@ struct AccountRow: View {
     }
 
     /// The status, then the key countdown, coloured fact by fact.
-    private func facts(now: Date) -> Text {
+    private var facts: Text {
         guard let account = entry.account else {
             return Text(entry.failure?.message ?? "No data").foregroundColor(.secondary)
         }
@@ -942,11 +961,6 @@ struct AccountRow: View {
             text =
                 text + Text(" · ").foregroundColor(.secondary)
                 + Text(keysText).foregroundColor(keysLevel.textTint ?? .secondary)
-        }
-        if let staleText = staleText(now: now) {
-            text =
-                text + Text(" · ").foregroundColor(.secondary)
-                + Text(staleText).foregroundColor(.orange)
         }
         return text
     }

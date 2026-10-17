@@ -827,7 +827,8 @@ struct MenuBarMetricPicker: View {
         // the threshold and the caption all measure it.
         let name = MenuBar.spokenName(health: model.health, text: model.menuBarFigures)
         let item = MenuBarImage.render(
-            symbol: model.health.symbol, text: model.menuBarText, description: name)
+            symbol: model.health.symbol, text: model.menuBarText,
+            maskWidth: model.menuBarMaskWidth, description: name)
         let width = MenuBar.width(of: item)
         let isWide = width > MenuBar.comfortableWidth
 

@@ -43,9 +43,10 @@ final class AppModel {
     /// row watches nothing, which is how "no account" is expressed.
     var addressDrafts = [AddressDraft()]
 
-    /// Replaces the account's address and its ALGO figures with bullets in the
-    /// panel and the menu bar, for screen sharing, screenshots, or simply not
-    /// wanting a balance on display all day.
+    /// Replaces the account's address, its ALGO figures and its keys' last
+    /// valid round, which names one key registration and so the account, with
+    /// bullets in the panel and the menu bar, for screen sharing, screenshots,
+    /// or simply not wanting a balance on display all day.
     ///
     /// This hides values from onlookers and nothing more. It is not a security
     /// control, and there is nothing here to secure: the address is public
@@ -252,8 +253,25 @@ final class AppModel {
         return figures.isEmpty ? nil : figures.joined(separator: MenuBar.separator)
     }
 
-    /// A metric's figure from the data on display, or nil while it has none.
+    /// How wide the mask over the earnings is drawn: as wide as the figure it
+    /// hides, or as that figure's stand-in, so hiding values moves neither the
+    /// item nor the panel that hangs from it.
+    var menuBarMaskWidth: CGFloat? {
+        guard valuesHidden, metrics.contains(.earned24h) else { return nil }
+        let hidden = unmaskedFigure(.earned24h) ?? standInShape(.earned24h)
+        return MenuBarImage.width(of: hidden.replacingOccurrences(of: " \(MenuBar.algo)", with: ""))
+    }
+
+    /// A metric's figure from the data on display, masked while values are
+    /// hidden, or nil while it has none.
     private func menuBarFigure(_ metric: MenuBarMetric) -> String? {
+        guard metric == .earned24h, valuesHidden else { return unmaskedFigure(metric) }
+        return unmaskedFigure(metric).map { _ in Self.maskedEarned }
+    }
+
+    /// A metric's figure as it reads with values shown, or nil while it has
+    /// none.
+    private func unmaskedFigure(_ metric: MenuBarMetric) -> String? {
         guard let update = display else { return nil }
         let portfolio = update.portfolio
         // Silent unless every account's proposals are current, so neither a
@@ -273,9 +291,7 @@ final class AppModel {
             return showsRewards ? "\(portfolio.proposals24h) blk" : nil
         case .earned24h:
             guard showsRewards else { return nil }
-            return valuesHidden
-                ? Self.maskedEarned
-                : "\(Format.algos(portfolio.earned24h, decimals: 1)) \(MenuBar.algo)"
+            return "\(Format.algos(portfolio.earned24h, decimals: 1)) \(MenuBar.algo)"
         }
     }
 
@@ -286,11 +302,16 @@ final class AppModel {
     private func menuBarStandIn(_ metric: MenuBarMetric) -> String {
         // The mask hides any figure, so it stands in for one as well.
         if metric == .earned24h, valuesHidden { return Self.maskedEarned }
-        return menuBarShapes[metric] ?? FigureShape.of(Self.typicalFigure(metric)) ?? ""
+        return standInShape(metric)
+    }
+
+    private func standInShape(_ metric: MenuBarMetric) -> String {
+        menuBarShapes[metric] ?? FigureShape.of(Self.typicalFigure(metric)) ?? ""
     }
 
     /// Masked rather than dropped: removing the segment would shrink the item
-    /// and shove every icon to its left along.
+    /// and shove every icon to its left along. The image sets the bullets as
+    /// wide as the figure they hide; see `menuBarMaskWidth`.
     private static let maskedEarned = "\(Format.hidden(4)) \(MenuBar.algo)"
 
     /// A figure of the usual width for each metric, whose shape stands in for

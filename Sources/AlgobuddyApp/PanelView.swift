@@ -591,8 +591,11 @@ struct AccountCard: View {
                     level: level(for: .keyExpiry),
                     // Exact, where the duration is the round clock's estimate:
                     // new keys are registered against this round, with the
-                    // lookback the alert names to spare.
-                    caption: "Last valid round \(Format.exactRound(expiry.lastValid))")
+                    // lookback the alert names to spare. Masked with the other
+                    // values, since it names the key registration, and so the
+                    // account, as plainly as the address.
+                    caption: "Last valid round "
+                        + (isHidden ? Format.hidden() : Format.exactRound(expiry.lastValid)))
             }
 
             ValueRow(title: "Last proposed", detail: lastProposedText)

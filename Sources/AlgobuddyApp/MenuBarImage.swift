@@ -26,9 +26,15 @@ enum MenuBarImage {
     /// baseline.
     private static let baselineLift: CGFloat = 0.5
 
-    /// - Parameter description: What VoiceOver calls the item. The status item
-    ///   takes its name from its image's description, so the image carries it.
-    static func render(symbol name: String, text: String?, description: String) -> NSImage {
+    /// - Parameters:
+    ///   - maskWidth: How wide the text's mask is drawn: as wide as the figure
+    ///     it hides, so hiding values moves neither the item nor the panel that
+    ///     hangs from it.
+    ///   - description: What VoiceOver calls the item. The status item takes
+    ///     its name from its image's description, so the image carries it.
+    static func render(
+        symbol name: String, text: String?, maskWidth: CGFloat? = nil, description: String
+    ) -> NSImage {
         // Alone, the symbol is what the status item would show anyway.
         guard let text else {
             return NSImage(systemSymbolName: name, accessibilityDescription: description)
@@ -37,9 +43,8 @@ enum MenuBarImage {
         let symbol = NSImage(systemSymbolName: name, accessibilityDescription: nil) ?? NSImage()
 
         let font = Self.font
-        let lines = text.components(separatedBy: MenuBar.algo).map { run in
-            CTLineCreateWithAttributedString(
-                NSAttributedString(string: run, attributes: [.font: font]))
+        let lines = text.components(separatedBy: MenuBar.algo).map {
+            line($0, font: font, maskWidth: maskWidth)
         }
         let textWidth =
             lines.reduce(0) { $0 + CTLineGetTypographicBounds($1, nil, nil, nil) }
@@ -78,6 +83,28 @@ enum MenuBarImage {
         image.isTemplate = true
         image.accessibilityDescription = description
         return image
+    }
+
+    /// How wide `text` is set in the menu bar's font.
+    static func width(of text: String) -> CGFloat {
+        CTLineGetTypographicBounds(line(text, font: font, maskWidth: nil), nil, nil, nil)
+    }
+
+    /// One run of the text, set as a line. Given a `maskWidth`, its mask, the
+    /// bullets `Format.hidden` writes, is set as many bullets as fit that
+    /// width, spaced to fill it exactly.
+    private static func line(_ run: String, font: NSFont, maskWidth: CGFloat?) -> CTLine {
+        let string = NSMutableAttributedString(string: run, attributes: [.font: font])
+        if let maskWidth, let mask = run.firstRange(of: /•+/) {
+            let bullet = width(of: Format.hidden(1))
+            let count = max(1, Int((maskWidth / bullet).rounded()))
+            let spacing = (maskWidth - CGFloat(count) * bullet) / CGFloat(count)
+            string.replaceCharacters(
+                in: NSRange(mask, in: run),
+                with: NSAttributedString(
+                    string: Format.hidden(count), attributes: [.font: font, .kern: spacing]))
+        }
+        return CTLineCreateWithAttributedString(string)
     }
 }
 

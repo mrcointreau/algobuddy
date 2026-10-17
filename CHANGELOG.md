@@ -1,5 +1,23 @@
 # Changelog
 
+## [1.4.0](https://github.com/mrcointreau/algobuddy/compare/v1.3.0...v1.4.0) (2026-10-17)
+
+
+### Features
+
+* **app:** draw the Algorand mark for ALGO amounts ([#38](https://github.com/mrcointreau/algobuddy/issues/38)) ([34cea0c](https://github.com/mrcointreau/algobuddy/commit/34cea0c954f5abd2be345218245cd06f4931acec))
+* **keys:** name the 320-round lead and the last valid round ([#39](https://github.com/mrcointreau/algobuddy/issues/39)) ([92bf359](https://github.com/mrcointreau/algobuddy/commit/92bf359b3da2684f8f397096f50dcce18beb29f9))
+* **settings:** add toolbar panes and bordered text fields ([#36](https://github.com/mrcointreau/algobuddy/issues/36)) ([a44d5e1](https://github.com/mrcointreau/algobuddy/commit/a44d5e18b0017da1fb4bd564712fdb40fc3ab676))
+
+
+### Bug Fixes
+
+* **app:** keep a stale account row at its height ([#47](https://github.com/mrcointreau/algobuddy/issues/47)) ([1a9f05c](https://github.com/mrcointreau/algobuddy/commit/1a9f05c2321e3facbf491f9d498e762fd95aee0e))
+* **app:** keep the menu bar width and mask the round when hiding ([#44](https://github.com/mrcointreau/algobuddy/issues/44)) ([21330a1](https://github.com/mrcointreau/algobuddy/commit/21330a1ae4a508cc2af56cedd010845072fb5dda))
+* **core:** decode the Not Participating account status ([#43](https://github.com/mrcointreau/algobuddy/issues/43)) ([44ad866](https://github.com/mrcointreau/algobuddy/commit/44ad866b7d09feb6f606165fc03e271453745e29))
+* keep a stale row's age current and test the menu bar in core ([#46](https://github.com/mrcointreau/algobuddy/issues/46)) ([8eccc38](https://github.com/mrcointreau/algobuddy/commit/8eccc3867f2a6b4809a88d6ac451f178ebb7d2c2))
+* name the menu bar item for VoiceOver and harden polling ([#41](https://github.com/mrcointreau/algobuddy/issues/41)) ([c1c86f6](https://github.com/mrcointreau/algobuddy/commit/c1c86f6ba9ba4e14d951d36037fe66fcb4a8c828))
+
 ## [1.3.0](https://github.com/mrcointreau/algobuddy/compare/v1.2.0...v1.3.0) (2026-10-16)
 
 

@@ -48,6 +48,7 @@ final class StubFetcher: HTTPFetching, @unchecked Sendable {
     private let lock = NSLock()
     private var routes: [(match: String, stub: Stub)] = []
     private var recorded: [String] = []
+    private var recordedHeaders: [[String: String]] = []
     private var failing = false
 
     var requests: [String] {
@@ -55,6 +56,9 @@ final class StubFetcher: HTTPFetching, @unchecked Sendable {
         defer { lock.unlock() }
         return recorded
     }
+
+    /// The headers each request was made with, in the order of `requests`.
+    var requestHeaders: [[String: String]] { lock.withLock { recordedHeaders } }
 
     func requestCount(containing fragment: String) -> Int {
         requests.filter { $0.contains(fragment) }.count
@@ -86,6 +90,7 @@ final class StubFetcher: HTTPFetching, @unchecked Sendable {
         // `NSLock.lock()` is unavailable from async contexts under Swift 6.
         let (isFailing, match) = lock.withLock { () -> (Bool, Stub?) in
             recorded.append(key)
+            recordedHeaders.append(headers)
             return (failing, routes.first { key.contains($0.match) }?.stub)
         }
 

@@ -107,7 +107,7 @@ enum Endpoint {
 
 public enum AlgodError: Error, Equatable, Sendable {
     case notHTTP
-    /// The endpoint needs a token that was not configured.
+    /// The endpoint requires a token, which algobuddy never sends.
     case unauthorized(path: String)
     case notFound(path: String)
     case http(status: Int, path: String)
@@ -133,19 +133,16 @@ extension AlgodError {
 
 /// Client for the three algod endpoints algobuddy reads.
 ///
-/// The token is optional and, against a public API provider, unnecessary, since
-/// those serve these endpoints unauthenticated. It exists so the same client
-/// can point at an algod that does require one. A 401 surfaces as
-/// `.unauthorized` rather than empty data, so the cause is visible instead of
-/// looking like an outage.
+/// It sends no token: a public API provider serves these endpoints without
+/// one, and algobuddy holds no credentials. An endpoint that requires one
+/// answers 401, which surfaces as `.unauthorized` rather than empty data, so
+/// the cause is visible instead of looking like an outage.
 public struct AlgodClient: Sendable {
     public let baseURL: URL
-    public let token: String?
     private let fetcher: HTTPFetching
 
-    public init(baseURL: URL, token: String? = nil, fetcher: HTTPFetching = URLSessionFetcher()) {
+    public init(baseURL: URL, fetcher: HTTPFetching = URLSessionFetcher()) {
         self.baseURL = baseURL
-        self.token = token
         self.fetcher = fetcher
     }
 
@@ -170,17 +167,12 @@ public struct AlgodClient: Sendable {
         Endpoint.resolve(path, against: baseURL)
     }
 
-    private func headers() -> [String: String] {
-        guard let token else { return [:] }
-        return ["X-Algo-API-Token": token]
-    }
-
     private func decode<T: Decodable>(
         _ type: T.Type,
         from path: String,
         timeout: TimeInterval = 15
     ) async throws -> T {
-        let (data, code) = try await fetcher.get(url(path), headers: headers(), timeout: timeout)
+        let (data, code) = try await fetcher.get(url(path), headers: [:], timeout: timeout)
         if let error = AlgodError(status: code, path: path) { throw error }
         do {
             return try JSONDecoder().decode(type, from: data)

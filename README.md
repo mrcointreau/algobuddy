@@ -66,7 +66,7 @@ Everything lives in Settings (⌘,), in four panes, and the window reopens on th
 
 ## What it deliberately doesn't do
 
-- **Connect to your node.** Not over SSH, a tunnel, a VPN, or an exposed endpoint. It never asks you to change `config.json` or install anything on the machine running algod.
+- **Need your node.** It reads public chain data, from a public provider by default, so it never asks for SSH, a tunnel, a VPN or an exposed endpoint, and never asks you to change `config.json` or install anything on the machine running algod. Pointing it at an algod you run is a choice for privacy, not a requirement.
 - **Hold keys.** It signs nothing and submits nothing.
 - **Store secrets.** There are none to store.
 - **Update itself.** The update check reads a version number and shows you a link. It downloads no code and runs nothing; `make install` stays a command you type.

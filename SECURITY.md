@@ -12,7 +12,7 @@ This section is unusually short, and that is the point.
 
 **No credentials.** There are no tokens, no keys, no passwords. There is no credential store because there is nothing to store.
 
-**No node access.** algobuddy never connects to your Algorand node, over SSH, a tunnel, a VPN, or an exposed endpoint. It cannot leak node credentials because it is never given any, and it cannot affect your node's operation because it never reaches it.
+**No node access.** algobuddy needs no access to your Algorand node: no SSH, no tunnel, no VPN and no exposed endpoint. By default it never reaches your node at all, and if you point it at an algod you run, it only reads the same public endpoints a provider serves, without credentials. It cannot leak node credentials because it is never given any, and it cannot affect your node's operation, because every request it makes is a read.
 
 **No signing.** It holds no spending key, constructs no transaction, and submits nothing to the network. Nothing it does can move funds or change your account's participation state.
 

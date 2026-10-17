@@ -28,7 +28,7 @@ struct ChainPollerTests {
         return ChainPoller(
             config: config,
             algod: AlgodClient(
-                baseURL: URL(string: "https://chain.example")!, token: nil, fetcher: stub),
+                baseURL: URL(string: "https://chain.example")!, fetcher: stub),
             indexer: withIndexer
                 ? IndexerClient(baseURL: URL(string: "https://idx.example")!, fetcher: stub)
                 : nil,
@@ -1310,7 +1310,7 @@ struct ChainPollerTests {
         return ChainPoller(
             config: config,
             algod: AlgodClient(
-                baseURL: URL(string: "https://chain.example")!, token: nil, fetcher: stub),
+                baseURL: URL(string: "https://chain.example")!, fetcher: stub),
             indexer: withIndexer
                 ? IndexerClient(baseURL: URL(string: "https://idx.example")!, fetcher: stub)
                 : nil,

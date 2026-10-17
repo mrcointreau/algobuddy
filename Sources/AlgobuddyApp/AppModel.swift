@@ -31,10 +31,12 @@ struct AddressDraft: Identifiable {
 @MainActor
 @Observable
 final class AppModel {
-    // Persisted settings. Views mutate these freely and call `apply()` on commit,
-    // rather than restarting the poller on every keystroke.
+    // Persisted settings. Views edit them freely and commit the rows and URL
+    // fields with `apply()` and the rest with `save()`, rather than restarting
+    // the poller on every keystroke.
 
-    /// The watched addresses, in the order every surface presents them.
+    /// The address rows as the user edits them, in the order every surface
+    /// presents the accounts they watch.
     ///
     /// Never empty: onboarding and Settings both need a row to type into, so
     /// removing the last one leaves a blank row rather than nothing. A blank
@@ -46,8 +48,8 @@ final class AppModel {
     /// wanting a balance on display all day.
     ///
     /// This hides values from onlookers and nothing more. It is not a security
-    /// control, and there is nothing here to secure: the address is public chain
-    /// data and the app holds no keys.
+    /// control, and there is nothing here to secure: the address is public
+    /// chain data and the app holds no keys.
     var valuesHidden = false
     /// What the panel and notifications call each account, keyed by address
     /// and applied with the list. Labels for the user's own eyes: stored on
@@ -66,8 +68,8 @@ final class AppModel {
     /// on display, aging visibly via its `observedAt`, until data returns.
     private(set) var lastData: ChainPoller.Update?
     /// A problem with the configured chain data source URLs, rendered in the
-    /// Data Source pane, which owns those fields. Address-shape problems are the
-    /// address field's own live validation, not this.
+    /// Data Source pane, which owns those fields. Address-shape problems are
+    /// the address field's own live validation, not this.
     private(set) var sourceError: String?
     private(set) var isRunning = false
 
@@ -77,10 +79,9 @@ final class AppModel {
 
     /// How many accounts the panel is about: the displayed data's, or, before
     /// any has arrived, how many are being watched. The panel becomes a list of
-    /// accounts only past one, and the menu bar and notifications name accounts
-    /// only past one, so this is the switch for all of them: a single account
-    /// has every surface to itself, so the menu bar and notifications need not
-    /// say which account they mean.
+    /// accounts only past one, and a notification names its account only past
+    /// one, so this is the switch for both: a single account has every surface
+    /// to itself, so a banner need not say which account it means.
     ///
     /// The watched count stands in until data arrives, deliberately: a
     /// portfolio whose first poll is still in flight must not head its panel
@@ -105,8 +106,8 @@ final class AppModel {
     var expectsRewards: Bool { applied?.indexerURL != nil }
 
     /// The account whose detail the panel shows, or nil for the list of all of
-    /// them. Held here rather than in the view, so the panel can drop it when it
-    /// closes and `apply()` can drop it when the account leaves the watch.
+    /// them. Held here rather than in the view, so the panel can drop it when
+    /// it closes and `apply()` can drop it when the account leaves the watch.
     var selectedAccount: AlgorandAddress?
 
     private var poller: ChainPoller?
@@ -129,7 +130,8 @@ final class AppModel {
         let indexerURL: URL?
 
         var source: String { algodURL.absoluteString }
-        /// addresses|algod|indexer: what decides a poller rebuild.
+        /// The addresses and both source URLs in one string, which decides
+        /// whether `apply()` rebuilds the poller.
         var identity: String {
             "\(addresses.joined(separator: ","))|\(source)|\(indexerURL?.absoluteString ?? "")"
         }
@@ -149,11 +151,10 @@ final class AppModel {
     /// figures.
     var watchedAddresses: [String] { applied?.addresses ?? [] }
 
-    /// The address the panel names when it is about a single account. Falls
-    /// back to the row being typed, which is all there is before a watch has
-    /// been applied.
-    var watchedAddress: String { watchedAddresses.first ?? addressDrafts.first?.text ?? "" }
-    /// What was last written to UserDefaults, so the steady state (no new
+    /// The address the panel names when it is about a single account. The panel
+    /// shows only while a watch runs, so this is always an applied one.
+    var watchedAddress: String { watchedAddresses.first ?? "" }
+    /// What was last written to `UserDefaults`, so the steady state (no new
     /// notifications, which is almost every poll) costs no write at all rather
     /// than a serialisation and cfprefsd round trip every 30 seconds.
     private var persistedHistory: [AlertKey: Date]?
@@ -179,8 +180,9 @@ final class AppModel {
 
     private let addressesKey = "addresses"
     /// Where a store can hold a single watched address instead of the list.
-    /// Read on load and cleared on the first save, so the watch it names
-    /// carries over exactly once and the address does not outlive the list.
+    /// Read on load and removed when `apply()` first stores the list, so the
+    /// watch it names carries over exactly once and the address does not
+    /// outlive the list.
     private let singleAddressKey = "address"
     private let accountNamesKey = "accountNames"
     private let menuBarShapesKey = "menuBarShapes"
@@ -198,8 +200,8 @@ final class AppModel {
 
     /// Everything the panel's Attention card should list: the participation
     /// alerts of the data on display, plus the source-outage alert when the
-    /// latest poll is failing. The same union `health` colours the icon with,
-    /// so the panel can always explain the icon.
+    /// latest poll is failing. `health` grades the menu bar icon from the same
+    /// union, so the panel can always explain the icon.
     var visibleAlerts: [HealthAlert] {
         guard let display else { return update?.alerts ?? [] }
         guard let update, !update.hasData else { return display.alerts }
@@ -278,8 +280,9 @@ final class AppModel {
     }
 
     /// What a metric shows while it has no figure: the shape of the last figure
-    /// it showed, remembered across launches, so the stand-in has as many digits
-    /// as the figure it waits for. Before any, the shape of a typical one.
+    /// it showed, remembered across launches, so the stand-in has as many
+    /// digits as the figure it waits for. Before any, the shape of a typical
+    /// one.
     private func menuBarStandIn(_ metric: MenuBarMetric) -> String {
         // The mask hides any figure, so it stands in for one as well.
         if metric == .earned24h, valuesHidden { return Self.maskedEarned }
@@ -322,14 +325,15 @@ final class AppModel {
 
     // MARK: - Launch at login
 
-    /// Mirrors `SMAppService`, which is the source of truth, since the user can also
-    /// revoke this from System Settings, so it is never cached in UserDefaults.
+    /// Mirrors `SMAppService`, which is the source of truth, since the user can
+    /// also revoke this from System Settings, so it is never cached in
+    /// `UserDefaults`.
     private(set) var loginItemStatus: SMAppService.Status = .notRegistered
     private(set) var loginItemError: String?
 
     var launchesAtLogin: Bool { loginItemStatus == .enabled }
 
-    /// The user approved it, but macOS is still waiting on confirmation in
+    /// The user turned it on, but macOS waits for the user to approve it in
     /// System Settings → General → Login Items.
     var loginItemNeedsApproval: Bool { loginItemStatus == .requiresApproval }
 
@@ -357,9 +361,9 @@ final class AppModel {
 
     /// Off the launch path deliberately: `status` is a synchronous XPC round
     /// trip to the background-task daemon, and the value is only ever shown in
-    /// Settings, so App.init must not wait on it before the menu bar appears.
-    /// The latest query wins, so an answer from before a toggle, or from before
-    /// an approval in System Settings, cannot land last.
+    /// Settings, so `AlgobuddyApp.init()` must not wait on it before the menu
+    /// bar appears. The latest query wins, so an answer from before a toggle,
+    /// or from before an approval in System Settings, cannot land last.
     func refreshLoginItemStatus() {
         guard canLaunchAtLogin else { return }
         loginStatusQueries += 1
@@ -534,11 +538,11 @@ final class AppModel {
     /// Persists the display-only preferences without disturbing the poller.
     ///
     /// The menu bar metrics, the notification toggle and the value mask take
-    /// effect immediately, as macOS settings do. The watched identity (address
-    /// and endpoint URLs) is deliberately **not** written here: it persists
-    /// only in `apply()` once validated, so a half-typed URL abandoned in the
-    /// edit buffer can never be saved by an unrelated checkbox and become the
-    /// live configuration at the next launch.
+    /// effect immediately, as macOS settings do. The watched identity (the
+    /// addresses and the endpoint URLs) is deliberately **not** written here:
+    /// it persists only in `apply()` once validated, so a half-typed URL
+    /// abandoned in the edit buffer can never be saved by an unrelated checkbox
+    /// and become the live configuration at the next launch.
     func save() {
         let defaults = UserDefaults.standard
         defaults.set(metrics.map(\.rawValue).sorted(), forKey: "metrics")
@@ -546,9 +550,10 @@ final class AppModel {
         defaults.set(valuesHidden, forKey: "valuesHidden")
     }
 
-    /// Persists settings and rebuilds the poller. For changes that alter *what*
-    /// is polled: the address, or a data source URL. A submit that changes
-    /// nothing leaves the running poller alone.
+    /// Persists the watch and rebuilds the poller. For changes to *what* is
+    /// polled, the address list or a data source URL, and to the account names,
+    /// which take effect without a rebuild. A submit that changes nothing that
+    /// is polled leaves the running poller alone.
     func apply() {
         // A field mid-edit never tears down what it watches, and never holds
         // back the fields beside it. Focus can leave a half-typed address or
@@ -637,8 +642,8 @@ final class AppModel {
             update = nil
             lastData = nil
         }
-        // Rewritten below whatever happened above, since pruning may have
-        // changed what is stored under these keys.
+        // Forgotten whatever happened above, so the next update writes the
+        // history again: pruning may change what is stored under these keys.
         persistedHistory = nil
         persistedSeverities = nil
         pruneAlertHistory(keeping: next)
@@ -666,7 +671,7 @@ final class AppModel {
             for await value in poller.updates {
                 guard let self else { return }
                 // A value already resumed from the old poller must not land
-                // under the new identity: apply() cancels this task, but
+                // under the new identity: `apply()` cancels this task, but
                 // cancellation cannot unschedule an iteration that has already
                 // resumed past its await.
                 guard self.poller === poller else { return }
@@ -680,11 +685,11 @@ final class AppModel {
         isRunning = true
 
         // Tied to a valid address rather than to startup. On a fresh install
-        // nothing is configured yet, so this line is never reached and no prompt
-        // arrives over an app that has nothing to notify about and no visible
-        // reason to want the permission. Once someone has asked for an account
-        // to be watched, the reason is self-evident. macOS answers from the
-        // stored decision after the first time, so reaching this again on a
+        // nothing is configured yet, so this line is never reached and no
+        // prompt arrives over an app that has nothing to notify about and no
+        // visible reason to want the permission. Once someone has asked for an
+        // account to be watched, the reason is self-evident. macOS answers from
+        // the stored decision after the first time, so reaching this again on a
         // configured launch shows nothing.
         if notificationsEnabled { requestNotificationAuthorization() }
     }
@@ -703,9 +708,9 @@ final class AppModel {
         isRunning = false
     }
 
-    /// Stops polling and drops the watched identity with its data. For the
-    /// paths where there is no longer a valid thing to watch; a menu bar still
-    /// showing the previous account's health would be a quiet lie.
+    /// Stops polling and drops the watched identity with its data. `apply()`
+    /// calls it when the list names no account, since a menu bar still showing
+    /// the health of accounts no longer watched would be a quiet lie.
     private func stopWatching() {
         stop()
         update = nil
@@ -716,11 +721,11 @@ final class AppModel {
         persistedSeverities = nil
     }
 
-    /// The notifications toggle. Distinct from `save()` because turning it on
-    /// has two side effects: the system authorisation prompt, which must be
-    /// requestable *now* rather than at the next address submit, and the
-    /// poller's dispatcher gate, which must stop consuming cooldowns while
-    /// notifications are off.
+    /// The notifications toggle. Distinct from `save()` because of two side
+    /// effects: turning it on asks for the system authorisation *now* rather
+    /// than at the next address submit, and every change sets the poller's
+    /// dispatcher gate, which must stop consuming cooldowns while notifications
+    /// are off.
     func setNotifications(enabled: Bool) {
         notificationsEnabled = enabled
         save()
@@ -813,8 +818,9 @@ final class AppModel {
     }
 
     /// Notification cooldowns are persisted so that quitting and relaunching
-    /// does not re-announce a condition the user has already seen. Without this,
-    /// a warning that legitimately holds for days notifies on every launch.
+    /// does not re-announce a condition the user has already seen. Without
+    /// this, a warning that legitimately holds for days notifies on every
+    /// launch.
     ///
     /// Bucketed by the chain data source, and keyed within it by account and
     /// rule: a cooldown recorded for one address means nothing about another,
@@ -901,6 +907,8 @@ final class AppModel {
         apply()
     }
 
+    // MARK: - Alert history
+
     private func loadAlertHistory() -> [AlertKey: Date] {
         guard let historyKey,
             let stored = UserDefaults.standard.dictionary(forKey: historyKey) as? [String: Double]
@@ -942,13 +950,14 @@ final class AppModel {
         UserDefaults.standard.set(levels, forKey: severitiesKey)
     }
 
-    /// The stamped bundle version: a tag number on release builds, a commit
-    /// hash on development builds, nil under `swift run` where no bundle
-    /// exists. Shown in Settings so a bug report can name the exact build.
+    // MARK: - Update check
+
+    /// The stamped bundle version: the tag on a tagged build, and otherwise the
+    /// nearest tag with the commits since it and the commit hash, or nil under
+    /// `swift run`, where no bundle exists. Shown in Settings so a bug report
+    /// can name the exact build.
     let appVersion: String? =
         Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
-
-    // MARK: - Update check
 
     /// The result of the last check this launch, or nil before one is asked
     /// for. Deliberately not persisted: a stale answer from yesterday would be
@@ -975,13 +984,16 @@ final class AppModel {
         }
     }
 
+    // MARK: - Notification delivery
+
     /// Both notification posting and login-item registration need a real bundle
     /// identity, which a bare binary under `swift run` lacks. One predicate, so
     /// the two features can never disagree about what counts as bundled.
     private var runsFromBundle: Bool { Bundle.main.bundleIdentifier != nil }
 
     /// `UNUserNotificationCenter` traps when there is no bundle identifier.
-    /// Guarding keeps the binary usable outside the .app wrapper for development.
+    /// Guarding keeps the binary usable outside the .app wrapper for
+    /// development.
     private var canNotify: Bool { runsFromBundle }
 
     /// The gate opens once the answer is read back, so nothing is dispatched
@@ -1034,8 +1046,8 @@ final class AppModel {
 
 /// Presents notifications as banners even while the app is active.
 ///
-/// Deliberately outside `AppModel`: notification-center callbacks arrive on an
-/// arbitrary queue, so this must not inherit the model's main-actor isolation.
+/// Not isolated to the main actor, as `AppModel` is: notification-center
+/// callbacks arrive on an arbitrary queue.
 private final class NotificationPresenter: NSObject, UNUserNotificationCenterDelegate {
     func userNotificationCenter(
         _ center: UNUserNotificationCenter,

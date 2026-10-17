@@ -35,9 +35,10 @@ extension ChainPoller.Update {
     }
 }
 
-/// Routes requests by URL substring and records what was asked for, so tests can
-/// assert on request *counts*: the difference between "fetches the challenge
-/// seed once per window" and "fetches it every poll" is invisible otherwise.
+/// Routes requests by URL substring and records what was asked for, so tests
+/// can assert on request *counts*: the difference between "fetches the
+/// challenge seed once per window" and "fetches it every poll" is invisible
+/// otherwise.
 final class StubFetcher: HTTPFetching, @unchecked Sendable {
     struct Stub {
         var status: Int
@@ -82,7 +83,7 @@ final class StubFetcher: HTTPFetching, @unchecked Sendable {
         _ url: URL, headers: [String: String], timeout: TimeInterval
     ) async throws -> (Data, Int) {
         let key = url.absoluteString
-        // NSLock.lock() is unavailable from async contexts under Swift 6.
+        // `NSLock.lock()` is unavailable from async contexts under Swift 6.
         let (isFailing, match) = lock.withLock { () -> (Bool, Stub?) in
             recorded.append(key)
             return (failing, routes.first { key.contains($0.match) }?.stub)
@@ -167,10 +168,10 @@ final class FirstRequestGate: HTTPFetching, @unchecked Sendable {
     }
 }
 
-/// Runs `rescue` unless cancelled within `seconds`. A test that holds a request
-/// or waits on a stream starts one, so a regression that would leave it waiting
-/// forever fails the test instead of hanging the suite. A time limit cannot do
-/// this: cancelling the test does not end a wait on another task's result.
+/// Runs `rescue` unless cancelled within `seconds`, so a regression that would
+/// leave a test waiting forever on a held request fails that test instead of
+/// hanging the suite. A time limit cannot do this: cancelling the test does not
+/// end a wait on another task's result.
 func watchdog(
     after seconds: Double = 10, _ rescue: @escaping @Sendable () async -> Void
 ) -> Task<Void, Never> {
@@ -198,7 +199,7 @@ enum JSONBuilder {
             "\"amount\":\(amount)",
             "\"status\":\"\(status)\"",
         ]
-        // algod serialises this with omitempty, so a non-eligible account has
+        // algod serialises this with `omitempty`, so a non-eligible account has
         // no field at all. The stub mirrors the wire: false means absent.
         if incentiveEligible { fields.append("\"incentive-eligible\":true") }
         if let lastProposed { fields.append("\"last-proposed\":\(lastProposed)") }

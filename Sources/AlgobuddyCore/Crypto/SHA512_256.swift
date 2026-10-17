@@ -15,12 +15,15 @@ public enum SHA512_256 {
     public static func hash(_ message: [UInt8]) -> [UInt8] {
         var h = iv
 
-        // Padding: 0x80, zeros to 112 mod 128, then a 128-bit big-endian bit count.
+        // Padding: 0x80, zeros to 112 mod 128, then a 128-bit big-endian bit
+        // count.
         var block = message
         let bitCount = UInt64(message.count) &* 8
         block.append(0x80)
         while block.count % 128 != 112 { block.append(0) }
-        block.append(contentsOf: [UInt8](repeating: 0, count: 8))  // high 64 bits of length
+        // The length field is 128 bits, and the high 64 of them are zero for
+        // any message that fits in memory.
+        block.append(contentsOf: [UInt8](repeating: 0, count: 8))
         for shift in stride(from: 56, through: 0, by: -8) {
             block.append(UInt8(truncatingIfNeeded: bitCount >> UInt64(shift)))
         }

@@ -45,7 +45,8 @@ struct PanelView: View {
         if let update = model.display, update.hasData {
             if update.entries.count == 1, let entry = update.entries.first {
                 // The entry's own address, so the title names the account whose
-                // figures follow, whatever is being typed in Settings meanwhile.
+                // figures follow, whatever is being typed in Settings
+                // meanwhile.
                 header { AddressTitle(address: entry.address.stringValue) }
                 Divider()
                 single(update, entry)
@@ -76,22 +77,21 @@ struct PanelView: View {
         }
     }
 
-    // Unscrolled for the same reason as SettingsView. Content here does vary
-    // (the alert list grows), so the window grows with it. A taller panel when
-    // several alerts hold reads far better than a short one that always
-    // scrolls. Spacing separates the groups. Dividers are reserved for the
-    // structural split between the panel's chrome and its content.
+    /// The page has no scroll view, so the window grows with the alert list: a
+    /// taller panel when several alerts hold reads far better than a short one
+    /// that always scrolls. Spacing, not dividers, separates the groups.
     private func single(_ update: ChainPoller.Update, _ entry: AccountUpdate) -> some View {
         VStack(alignment: .leading, spacing: Spacing.group) {
             // The only account's failure is every account's, so the line
-            // beneath the cards states it once, rather than this section as well.
+            // beneath the cards states it once, rather than this section as
+            // well.
             AccountSection(
                 update: update, entry: entry, statesOwnFailure: false,
                 expectsRewards: model.expectsRewards)
-            // visibleAlerts, not this update's own list: during an outage
-            // the displayed data is the last good poll, and the outage
-            // alert colouring the menu bar icon lives on the latest failed
-            // one. The card must be able to explain the icon.
+            // `visibleAlerts`, not this update's own list: during an outage the
+            // displayed data is the last good poll, and the outage alert that
+            // sets the menu bar symbol lives on the latest failed one. The card
+            // must be able to explain the icon.
             if !model.visibleAlerts.isEmpty {
                 AlertsCard(alerts: model.visibleAlerts, namesAccounts: false)
             }
@@ -111,10 +111,11 @@ struct PanelView: View {
             if !alerts.isEmpty {
                 AlertsCard(alerts: alerts, namesAccounts: false)
             }
-            // A stage every account depends on, or a failure every account has,
-            // as in a full outage, when this page shows the last good figures.
-            // Another account's own failure is not this page's to state, and
-            // one the section above already states is not said twice.
+            // The panel-wide failure shows here too: one at a stage every
+            // account depends on, or one every account has, as in a full
+            // outage, when this page shows the last good figures. Another
+            // account's own failure is not this page's to state, and one the
+            // section above already states is not said twice.
             if let failure = model.sharedFailure, failure != entry.failure {
                 FailureLine(failure: failure)
             }
@@ -139,12 +140,12 @@ struct PanelView: View {
         }
     }
 
-    // Degradation, stated rather than implied. Partial failures (supply,
-    // challenge seed, rewards) ride on successful polls with a fresh header
-    // age and no alert of their own, so this line is the only sign some
-    // figures are stale or missing. A wholly failed poll leaves the cards
-    // showing the last good data, aging in the header; this line names the
-    // reason. One account's own failure is not here but beside its own facts.
+    /// Degradation, stated rather than implied. Partial failures (supply,
+    /// challenge seed, rewards) ride on successful polls with a fresh header
+    /// age and no alert of their own, so this line is the only sign some
+    /// figures are stale or missing. A wholly failed poll leaves the cards
+    /// showing the last good data, aging in the header; this line names the
+    /// reason. One account's own failure is not here but beside its own facts.
     @ViewBuilder
     private var sharedFailureLine: some View {
         if let failure = model.sharedFailure {
@@ -166,8 +167,8 @@ struct PanelView: View {
         model.selectedAccount = address
     }
 
-    // Every account is named on its own row, so the header states the size of
-    // the portfolio rather than electing one address to stand for all of them.
+    /// Every account is named on its own row, so the header states the size of
+    /// the portfolio rather than electing one address to stand for all of them.
     private var accountCountTitle: some View {
         Text(quantity(Double(model.accountCount), "account"))
             .font(Typography.primary)
@@ -208,7 +209,7 @@ struct PanelView: View {
         HStack(spacing: 8) {
             identity()
             Spacer()
-            // Ticks on its own. A plain Text would freeze at whatever the age
+            // Ticks on its own. A plain `Text` would freeze at whatever the age
             // was when the last poll happened to re-render the view, which is
             // exactly the number you must not get wrong on a staleness readout.
             // The age of the *data* on display, not of the last poll attempt: a
@@ -285,8 +286,8 @@ struct PanelView: View {
             .keyboardShortcut("p", modifiers: .command)
 
             // HIG: "When people choose the Settings item … your custom settings
-            // window opens." SettingsLink opens the Settings scene, which is a
-            // real window, so editing a URL does not happen inside a popover
+            // window opens." `SettingsLink` opens the Settings scene, which is
+            // a real window, so editing a URL does not happen inside a popover
             // that dismisses the moment it loses focus.
             SettingsLink {
                 MenuRowLabel(title: "Settings…", symbol: "gearshape", shortcut: "⌘,")
@@ -294,8 +295,8 @@ struct PanelView: View {
             .buttonStyle(.plain)
             .simultaneousGesture(TapGesture().onEnded { SettingsWindow.bringToFront() })
 
-            // HIG: group logically related items and separate them. Quit sits in
-            // its own group at the bottom of every macOS app menu.
+            // HIG: group logically related items and separate them. Quit sits
+            // in its own group at the bottom of every macOS app menu.
             Divider().padding(.vertical, 4)
 
             MenuRow(title: "Quit algobuddy", symbol: "power", shortcut: "⌘Q") {
@@ -309,17 +310,17 @@ struct PanelView: View {
 
 /// Drags the Settings window in front of everything else.
 ///
-/// `SettingsLink` opens the Settings scene but does not activate the app, and an
-/// `LSUIElement` agent is never the frontmost app, so the window opens *behind*
-/// whatever the user was looking at, with no Dock icon to click and no way to
-/// reach it short of minimising other windows.
+/// `SettingsLink` opens the Settings scene but does not activate the app, and
+/// an `LSUIElement` agent is never the frontmost app, so the window opens
+/// *behind* whatever the user was looking at, with no Dock icon to click and no
+/// way to reach it short of minimising other windows.
 ///
-/// The alternative, promoting the app to `.regular` while a window is open so it
-/// gains a Dock icon, is deliberately not taken: Docker, the menu bar agent this
-/// panel is modelled on, does not do that either. It ships a separate nested app
-/// for its dashboard. An icon appearing and vanishing from the Dock and ⌘-Tab is
-/// a persistent cost for a rare situation, and reopening Settings from the menu
-/// already re-fronts the window.
+/// The alternative, promoting the app to `.regular` while a window is open so
+/// it gains a Dock icon, is deliberately not taken: Docker, the menu bar agent
+/// this panel is modelled on, does not do that either. It ships a separate
+/// nested app for its dashboard. An icon appearing and vanishing from the Dock
+/// and ⌘-Tab is a persistent cost for a rare situation, and reopening Settings
+/// from the menu already re-fronts the window.
 ///
 /// `activate()` alone is not enough: the scene may not have materialised its
 /// window yet when the tap is handled, and a non-active app's window needs
@@ -423,8 +424,8 @@ struct MenuRowLabel: View {
     /// enough to feel unacknowledged without one.
     var isBusy = false
 
-    /// Picks up `.disabled(_:)` from the caller so a dimmed, inert row comes for
-    /// free rather than each call site handling it.
+    /// Picks up `.disabled(_:)` from the caller so a dimmed, inert row comes
+    /// for free rather than each call site handling it.
     @Environment(\.isEnabled) private var isEnabled
 
     var body: some View {
@@ -454,7 +455,7 @@ struct MenuRowLabel: View {
                 Text(shortcut).foregroundStyle(.secondary)
             }
         }
-        // The real NSFont.menuFont, so rows match native menus exactly.
+        // The real `NSFont.menuFont`, so rows match native menus exactly.
         .font(Typography.menuRow)
         .padding(.horizontal, 8)
         .padding(.vertical, 5)
@@ -469,8 +470,9 @@ struct MenuRowLabel: View {
 /// and the stake and the proposals, which genuinely add up across accounts.
 ///
 /// No countdowns here. A closest deadline without its account is a number with
-/// no owner, and each account's row in the list states its own. Every row here
-/// is a plain fact: what any of them means is the Attention section's to say.
+/// no owner, so each account states its own: the key countdown in its row, and
+/// the rest on its page. Every row here is a plain fact: what any of them means
+/// is the Attention section's to say.
 struct PortfolioCard: View {
     let summary: PortfolioSummary
     /// Whether proposal figures are on their way, so their rows keep their
@@ -517,16 +519,16 @@ struct PortfolioCard: View {
         }
     }
 
-    /// How much of the portfolio is actually participating. An account whose
-    /// fetch failed is in neither number, so this counts what is known now.
+    /// How much of the portfolio is online, by each account's latest known
+    /// record. An account never fetched is in neither number.
     private var participationText: String {
         "\(summary.onlineAccounts) of \(quantity(Double(summary.accountCount), "account")) online"
     }
 }
 
-/// One watched account's facts: its card and its proposals, or a quiet line
-/// when this cycle learned nothing about it. The page it sits on names the
-/// account in its header.
+/// One watched account's facts: its card and its proposals, as last fetched,
+/// and a quiet line for its own failure where `statesOwnFailure` asks for one.
+/// The page it sits on names the account in its header.
 struct AccountSection: View {
     /// The cycle, for the round and round time every account shares.
     let update: ChainPoller.Update
@@ -568,8 +570,8 @@ struct AccountCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.row) {
-            // Status and balance on one line. Online, eligibility and overall
-            // health are one fact, stated once.
+            // Status and balance on one line. Whether the account is online and
+            // whether it earns are one fact, stated once.
             HStack(spacing: 6) {
                 Circle().fill(account.statusTint).frame(width: 8, height: 8)
                 Text(account.statusText).font(Typography.primary.weight(.medium))
@@ -582,8 +584,9 @@ struct AccountCard: View {
                 MeterRow(
                     title: "Participation keys",
                     detail: Format.duration(expiry.timeRemaining(roundTime: update.roundTime)),
-                    // Raw; MeterRow clamps and guards non-finite values itself,
-                    // so a zero-length window degrades to an empty bar.
+                    // `MeterRow` clamps the fraction and guards non-finite
+                    // values itself, so a zero-length window degrades to an
+                    // empty bar.
                     fraction: Double(max(0, expiry.roundsRemaining)) / Double(expiry.totalRounds),
                     level: level(for: .keyExpiry),
                     // Exact, where the duration is the round clock's estimate:
@@ -594,10 +597,10 @@ struct AccountCard: View {
 
             ValueRow(title: "Last proposed", detail: lastProposedText)
 
-            // Only once some of the allowance is actually spent. On a healthy
-            // account the headroom runs to weeks and saying so every poll is
-            // noise. The poller derives absence only for Online accounts, so no
-            // status check is needed here.
+            // Only once a quarter of the allowance is spent: a healthy account
+            // stays well below that, and its headroom stated every poll would
+            // be noise. The poller derives absence only for Online accounts, so
+            // no status check is needed here.
             if let absence = entry.absence, absence.ratio > 0.25 {
                 ValueRow(
                     title: "Absence headroom",
@@ -615,8 +618,6 @@ struct AccountCard: View {
     }
 
     /// The account's own clock: how long since the chain last saw it propose.
-    /// Compare against the expected interval: for a healthy node this should
-    /// sit comfortably below it.
     private var lastProposedText: String {
         guard let proposed = account.lastProposed, proposed > 0,
             let current = update.currentRound, current >= proposed
@@ -626,10 +627,11 @@ struct AccountCard: View {
     }
 
     /// Meter severity is read back from the alerts the engine already produced,
-    /// rather than re-deriving thresholds here. Hardcoding the ratios in SwiftUI
-    /// would duplicate `AlertThresholds`, so a meter could disagree with its own
-    /// notification. Matched on the account as well as the rule, so a meter can
-    /// only ever be coloured by an alert about the account it belongs to.
+    /// rather than re-deriving thresholds here. Hardcoding the ratios in
+    /// SwiftUI would duplicate `AlertThresholds`, so a meter could disagree
+    /// with its own notification. Matched on the account as well as the rule,
+    /// so a meter can only ever be coloured by an alert about the account it
+    /// belongs to.
     private func level(for id: AlertID) -> MeterLevel {
         MeterLevel(update.alerts.first { $0.id == id && $0.address == entry.address }?.severity)
     }
@@ -662,9 +664,10 @@ struct RewardsCard: View {
 /// The 24-hour and 7-day proposal figures.
 ///
 /// A `Grid`, so the counts and the amounts each form their own column and align
-/// down the rows. HIG: "Align components with one another to make them easier to
-/// scan." Shared by one account's card and the portfolio summary, so the same
-/// two figures cannot be laid out or masked two different ways.
+/// down the rows. HIG: "Align elements to make them easier to scan, and use
+/// indentation to convey hierarchy." Shared by one account's card and the
+/// portfolio summary, so the same two figures cannot be laid out or masked two
+/// different ways.
 struct ProposalsGrid: View {
     /// Each nil while the proposals are on their way, and shown as a dash in a
     /// row of the same height.
@@ -840,9 +843,10 @@ struct AccountsCard: View {
 ///
 /// The glyph carries the grade in shape as well as colour, the same shapes as
 /// the menu bar icon, for anyone who cannot tell the colours apart. Elsewhere
-/// colour marks only the fact an alert names, as on the account's card: the key
+/// colour marks the fact an alert names, as on the account's card: the key
 /// countdown takes the key alert's tint, and the status takes the grade's tint
-/// only when the account is not online and something is wrong.
+/// only when the account is not online and something is wrong. A stale row's
+/// age is orange, as an old age is in the header.
 struct AccountRow: View {
     let update: ChainPoller.Update
     let entry: AccountUpdate
@@ -996,8 +1000,7 @@ struct AddressTitle: View {
     }
 
     /// One line whatever the name, since the header keeps one height on every
-    /// page. Before anything is applied, the header shows the row being typed,
-    /// which may name no account yet and so has no name.
+    /// page.
     @ViewBuilder
     private var title: some View {
         let short = Format.addressLabel(address, hidden: isHidden)
@@ -1055,8 +1058,9 @@ private struct ScreenCapped<Content: View>: View {
 
     var body: some View {
         CappedHeight(limit: Self.limit) {
-            // Measured, never drawn: a scroll view reports a small ideal height,
-            // so the content's own height has to come from a copy of it.
+            // Measured, never drawn: a scroll view reports a small ideal
+            // height, so the content's own height has to come from a copy of
+            // it.
             content.hidden()
             ScrollView { content }
                 .scrollBounceBehavior(.basedOnSize)
@@ -1151,8 +1155,8 @@ private struct PanelWindowKeeper: NSViewRepresentable {
         /// back on its old course.
         private var animationTarget: NSRect?
 
-        // The view has no window at construction, so the observation starts
-        // once it is placed in one, and moves with it.
+        /// The view has no window at construction, so the observation starts
+        /// once it is placed in one, and moves with it.
         override func viewDidMoveToWindow() {
             super.viewDidMoveToWindow()
             for observer in observers {
@@ -1167,7 +1171,8 @@ private struct PanelWindowKeeper: NSViewRepresentable {
                 center.addObserver(
                     forName: NSWindow.didResignKeyNotification, object: window, queue: .main
                 ) { [weak self] _ in
-                    // Posted on the main thread, where this view and the model live.
+                    // Posted on the main thread, where this view and the model
+                    // live.
                     MainActor.assumeIsolated {
                         self?.hasFitted = false
                         self?.detach()
@@ -1266,7 +1271,8 @@ private struct PanelWindowKeeper: NSViewRepresentable {
                 ? item.frame.maxX + anchor.offset - width : item.frame.minX + anchor.offset
         }
 
-        /// Moves the panel after its item, which has just moved or changed width.
+        /// Moves the panel after its item, which has just moved or changed
+        /// width.
         private func follow() {
             guard let window, window.isVisible else { return }
             var frame = animationTarget ?? window.frame
@@ -1339,7 +1345,8 @@ struct ChallengeRow: View {
     private var detail: String {
         guard challenge.isChallenged else { return "not selected" }
         guard challenge.isFailing else { return "answered" }
-        // Past the grace period `Format.duration` reads "overdue" on its own.
+        // Past the grace period `Format.duration` already reads "overdue", so
+        // the row says so alone rather than "overdue to answer".
         return challenge.phase == .enforcing
             ? "overdue"
             : "\(Format.duration(challenge.timeUntilDeadline(roundTime: roundTime))) to answer"
@@ -1349,10 +1356,10 @@ struct ChallengeRow: View {
 /// A capacity gauge, deliberately not a `ProgressView`.
 ///
 /// HIG: "All progress indicators are transient, appearing only while an
-/// operation is ongoing and disappearing after it completes." Key validity and
-/// absence headroom are standing state, not tasks, so a progress bar is the
-/// wrong component. A gauge in the capacity style is the right one: "a fill that
-/// stops at the value's location on the path."
+/// operation is ongoing and disappearing after it completes." Key validity is
+/// standing state, not a task, so a progress bar is the wrong component. A
+/// gauge in the capacity style is the right one: "a fill that stops at the
+/// value's location on the path."
 struct MeterRow: View {
     let title: String
     let detail: String
@@ -1371,8 +1378,8 @@ struct MeterRow: View {
                     .foregroundStyle(level.valueStyle)
             }
             // An empty label, not `.labelsHidden()`: that modifier does not
-            // suppress a Gauge's label in the capacity style, which would draw
-            // the title a second time above the bar.
+            // suppress the label of a `Gauge` in the capacity style, which
+            // would draw the title a second time above the bar.
             Gauge(value: fraction.isFinite ? min(max(fraction, 0), 1) : 0) {
                 EmptyView()
             }
@@ -1385,8 +1392,8 @@ struct MeterRow: View {
                     .foregroundStyle(.secondary)
             }
         }
-        // Collapse to one element so VoiceOver reads "Participation keys, 66
-        // days" rather than spelling out the bar's raw fraction.
+        // Collapse to one element so VoiceOver reads the title, the value and
+        // the caption, rather than spelling out the bar's raw fraction.
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(title)
         .accessibilityValue(

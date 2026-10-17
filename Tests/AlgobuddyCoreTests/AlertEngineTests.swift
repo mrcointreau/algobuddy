@@ -38,9 +38,10 @@ struct AlertEngineTests {
             roundsUntilDeadline: remaining)
     }
 
-    /// A challenge is issued roughly once a day and the node answers it from its
-    /// own heartbeat. Alerting for the whole window would fire daily on a healthy
-    /// node and then withdraw itself, which is how an alarm gets ignored.
+    /// A challenge is issued roughly once a day and the node answers it from
+    /// its own heartbeat. Alerting for the whole window would fire daily on a
+    /// healthy node and then withdraw itself, which is how an alarm gets
+    /// ignored.
     @Test("an unanswered challenge with grace remaining stays quiet")
     func challengeEarlyInGraceIsQuiet() {
         #expect(engine.evaluate(Snapshot(challenge: challenge(remaining: 150))).isEmpty)
@@ -57,8 +58,8 @@ struct AlertEngineTests {
         #expect(alert?.body.contains("minutes") == true)
     }
 
-    /// Units agree in number. "1 minutes" in the one alert that fires with
-    /// minutes left reads as a placeholder someone forgot to finish.
+    /// Units agree in number. "1 minutes" in an alert body reads as a
+    /// placeholder someone forgot to finish.
     @Test("a single unit is singular")
     func singularUnits() {
         let alert = engine.evaluate(Snapshot(challenge: challenge(remaining: 20)))
@@ -244,8 +245,8 @@ struct AlertEngineTests {
     @Test(
         "balance outside the payout window warns",
         arguments: [
-            UInt64(29_999_000_000),  // just under 30,000 ALGO
-            UInt64(70_000_000_000_001),  // just over 70M ALGO
+            UInt64(29_999_000_000),  // Just under 30,000 ALGO.
+            UInt64(70_000_000_000_001),  // Just over 70M ALGO.
         ])
     func balanceRange(amount: UInt64) {
         #expect(
@@ -367,9 +368,9 @@ struct AlertEngineTests {
     }
 }
 
-/// The storage key is the only way persisted cooldowns come back after a
-/// relaunch, so a key that fails to read back silently drops all of them, and
-/// every condition still holding is announced again.
+/// The storage key is the only way a persisted cooldown comes back after a
+/// relaunch, so a key that fails to read back silently drops its cooldown, and
+/// the condition, if it still holds, is announced again.
 @Suite("Alert keys")
 struct AlertKeyTests {
     let address = try! AlgorandAddress(
@@ -384,8 +385,8 @@ struct AlertKeyTests {
         }
     }
 
-    /// Each of these lacks a part that `storageKey` always writes, or names a
-    /// rule or an address that does not exist.
+    /// Each of these lacks a part that `storageKey` always writes, adds a part
+    /// it never writes, or names a rule or an address that cannot exist.
     @Test("a string that storageKey did not write reads back as nil")
     func foreignStrings() {
         for text in ["", "keyExpiry", "|noSuchRule", "NOTANADDRESS|keyExpiry", "|keyExpiry|x"] {

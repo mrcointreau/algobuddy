@@ -2,10 +2,11 @@ import Foundation
 
 /// Consensus constants that govern incentives and suspension.
 ///
-/// These are **protocol-version dependent** and hardcoded to v40. Nothing checks
-/// the version the chain actually reports, so when a new consensus version ships,
-/// `Absence` and `Challenge` will go on using these numbers without saying so.
-/// Keying them by `/v2/status.last-version` is the fix.
+/// These are **protocol-version dependent** and hardcoded to v40. Nothing
+/// checks the version the chain actually reports, so when a new consensus
+/// version ships, the absence, challenge, payout-window and key-registration
+/// figures will go on using these numbers without saying so. Keying them by
+/// `/v2/status.last-version` is the fix.
 ///
 /// Values transcribed from go-algorand `config/consensus.go` (`v40`) and
 /// `ledger/eval/eval.go` (`absentFactor`), not from documentation.
@@ -17,7 +18,8 @@ public struct ConsensusParams: Sendable, Equatable {
     public let challengeGracePeriod: UInt64
     public let challengeBits: Int
     /// Multiplier on the expected proposal interval before an account counts as
-    /// absent. This is 20, not 10; see `ledger/eval/eval.go`.
+    /// absent: 20 since go-algorand added heartbeats, where earlier releases
+    /// used 10; see `ledger/eval/eval.go`.
     public let absentFactor: UInt64
     /// How many rounds back agreement reads an account's balance and keys, so
     /// keys registered in round r first vote in round r + 320. This is

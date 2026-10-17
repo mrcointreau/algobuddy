@@ -86,13 +86,14 @@ struct PortfolioSummaryTests {
             ],
             roundTime: roundTime)
 
-        #expect(summary.closestAbsenceHeadroom == 600)  // 200 rounds at 3 s
-        #expect(summary.closestKeyExpiry == 1_500)  // 500 rounds at 3 s
+        #expect(summary.closestAbsenceHeadroom == 600)  // 200 rounds at 3 s.
+        #expect(summary.closestKeyExpiry == 1_500)  // 500 rounds at 3 s.
     }
 
     /// The menu bar's key countdown follows the alerts, which say nothing about
     /// the keys of an account that is not Online. A suspended account's lapsed
-    /// keys would otherwise read "overdue" while the Online one has months left.
+    /// keys would otherwise read "overdue" while the Online one has months
+    /// left.
     @Test("the key countdown counts Online accounts only")
     func keyExpiryCountsOnlineAccountsOnly() {
         let lapsed = KeyExpiry(
@@ -107,7 +108,7 @@ struct PortfolioSummaryTests {
             keyExpiry: lapsed)
 
         let both = PortfolioSummary(entries: [online, suspended], roundTime: roundTime)
-        #expect(both.closestKeyExpiry == 2_700_000)  // 900,000 rounds at 3 s
+        #expect(both.closestKeyExpiry == 2_700_000)  // 900,000 rounds at 3 s.
         let alone = PortfolioSummary(entries: [suspended], roundTime: roundTime)
         #expect(alone.closestKeyExpiry == nil)
     }
@@ -192,8 +193,9 @@ struct PortfolioSummaryTests {
         #expect(summary.totalStake == MicroAlgos(7))
     }
 
-    /// An account whose fetch failed says nothing about itself this cycle, so
-    /// counting it would report a portfolio smaller and quieter than it is.
+    /// An account with no record yet, as when its first fetch fails, has no
+    /// figures to add, so counting it would show an account with no stake and
+    /// no deadlines.
     @Test("an account with no data contributes nothing")
     func failedAccountIsNotCounted() {
         let summary = PortfolioSummary(
@@ -251,7 +253,8 @@ struct PortfolioSummaryTests {
                     address: address(2), account: second, rewards: rewards(proposals24h: 1),
                     failure: PollFailure(stage: .rewards, message: ""))
             ).isPartial)
-        // Its own fetch failed, so its figures are carried from an earlier cycle.
+        // Its own fetch failed, so its figures are carried from an earlier
+        // cycle.
         #expect(
             summary(
                 with: AccountUpdate(

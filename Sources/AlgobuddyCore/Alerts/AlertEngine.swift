@@ -9,8 +9,9 @@ public enum AlertSeverity: Int, Sendable, Comparable {
 }
 
 public enum AlertID: String, Sendable, CaseIterable, Codable {
-    /// The configured chain data source. algobuddy holds no separate connection to the user's
-    /// own node, so there is no "node unreachable" counterpart.
+    /// The configured chain data source does not answer. algobuddy holds no
+    /// separate connection to the user's own node, so there is no "node
+    /// unreachable" counterpart.
     case chainSourceUnreachable
     /// One watched account the source keeps failing to return while it answers
     /// for the others, so that account's figures and alerts are not current.
@@ -127,9 +128,10 @@ extension Sequence where Element == HealthAlert {
     /// The alerts that hold for one account.
     ///
     /// An alert about the watch itself, such as the chain data source being
-    /// unreachable, carries no address and concerns every account alike. Whether
-    /// it counts depends on the question: grading one account against the others
-    /// leaves it out, while everything said about that one account includes it.
+    /// unreachable, carries no address and concerns every account alike.
+    /// Whether it counts depends on the question: grading one account against
+    /// the others leaves it out, while everything said about that one account
+    /// includes it.
     public func about(_ address: AlgorandAddress, includingWatchAlerts: Bool) -> [HealthAlert] {
         filter { $0.address == address || (includingWatchAlerts && $0.address == nil) }
     }
@@ -137,8 +139,9 @@ extension Sequence where Element == HealthAlert {
 
 /// Everything the alert rules read.
 ///
-/// The chain-derived fields are optional because a poll can fail or an account can lack
-/// participation keys; rules whose inputs are missing simply do not fire.
+/// The chain-derived fields are optional because a poll can fail or an account
+/// can lack participation keys; rules whose inputs are missing simply do not
+/// fire.
 public struct Snapshot: Sendable {
     public var roundTime: TimeInterval
     public var params: ConsensusParams
@@ -170,8 +173,8 @@ public struct Snapshot: Sendable {
 }
 
 public struct AlertThresholds: Sendable {
-    /// Rounds of grace remaining below which an unanswered challenge becomes
-    /// critical.
+    /// Rounds of grace remaining at or below which an unanswered challenge
+    /// becomes critical.
     ///
     /// A challenge is issued every 1000 rounds and answered by the node's own
     /// heartbeat. Treating the whole grace period as critical would raise the
@@ -206,14 +209,14 @@ public struct AlertEngine: Sendable {
         return alerts.map { $0.held(for: snapshot.address) }.sorted { $0.severity > $1.severity }
     }
 
-    /// Every alert follows one shape: the title names the condition, and the body states the
-    /// consequence, then the action where the reader has one.
+    /// Every alert follows one shape: the title names the condition, and the
+    /// body states the consequence, then the action where the reader has one.
     private func participationAlerts(_ snapshot: Snapshot) -> [HealthAlert] {
         var alerts = [HealthAlert]()
 
         // An account that is already Offline cannot be warned about suspension,
-        // and its keys and challenges no longer matter. Suppress the lot and say
-        // the one thing that is true.
+        // and its keys and challenges no longer matter. Suppress the lot and
+        // say the one thing that is true.
         if snapshot.account?.status == .offline {
             return [
                 HealthAlert(

@@ -56,7 +56,8 @@ public struct AccountUpdate: Sendable {
             isStale: isStale)
     }
 
-    /// This entry, carried into a later cycle whose fetch of the account failed.
+    /// This entry, carried into a later cycle whose fetch of the account
+    /// failed.
     func stale(failure: PollFailure?) -> AccountUpdate {
         AccountUpdate(
             address: address, account: account, absence: absence, challenge: challenge,

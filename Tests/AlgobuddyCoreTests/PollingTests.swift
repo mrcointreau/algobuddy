@@ -46,8 +46,8 @@ struct RoundClockTests {
     func outliers() {
         var clock = RoundClock()
         clock.observe(round: 1_000, at: start)
-        // One round after an hour: a stalled chain, not a round time.
-        clock.observe(round: 1_001, at: start.addingTimeInterval(3_600))
+        // Ten rounds in an hour: a stalled chain, not a round time.
+        clock.observe(round: 1_010, at: start.addingTimeInterval(3_600))
         #expect(clock.sampleCount == 0)
         #expect(clock.estimate == RoundClock.nominal)
     }
@@ -63,9 +63,9 @@ struct RoundClockTests {
         #expect(abs(clock.estimate - 2.8) < 0.01)
     }
 
-    /// A refresh seconds after a poll sees a few rounds, where one round more or
-    /// less is a large part of the sample. Its start stays, so the next sample
-    /// spans both.
+    /// A refresh seconds after a poll sees a few rounds, where one round more
+    /// or less is a large part of the sample. Its start stays, so the next
+    /// sample spans both.
     @Test("a sample over too few rounds waits for a longer one")
     func shortSampleWaits() {
         var clock = RoundClock()
@@ -119,7 +119,8 @@ struct RoundClockTests {
 
     /// Each 30 s poll sees 10 or 11 whole rounds of 2.8 s, a swing of about 5%
     /// per sample. Once the rounds have been watched long enough, the estimate
-    /// comes from the whole span and stays within a small fraction of a percent.
+    /// comes from the whole span and stays within a small fraction of a
+    /// percent.
     @Test("a long span removes the poll-to-poll swing")
     func longSpanIsSteady() {
         var clock = RoundClock()
@@ -242,14 +243,14 @@ struct AlertDispatcherTests {
         _ = dispatcher.dispatch([alert()], now: start)
         for step in 1...10 {
             let at = start.addingTimeInterval(Double(step) * 30)
-            _ = dispatcher.dispatch([], now: at)  // clears
-            #expect(dispatcher.dispatch([alert()], now: at).isEmpty)  // and returns
+            _ = dispatcher.dispatch([], now: at)  // The alert clears.
+            #expect(dispatcher.dispatch([alert()], now: at).isEmpty)  // It returns at once.
         }
     }
 
-    /// Escalation must survive a clear. Without a remembered severity, a warning
-    /// that cleared and returned as critical inside the cooldown notifies
-    /// nobody, which defeats the escalation bypass entirely.
+    /// Escalation must survive a clear. Without a remembered severity, a
+    /// warning that cleared and returned as critical inside the cooldown
+    /// notifies nobody, which defeats the escalation bypass entirely.
     @Test("escalation still notifies after the condition briefly cleared")
     func escalationSurvivesClear() {
         var dispatcher = AlertDispatcher(cooldown: 900)
@@ -258,7 +259,8 @@ struct AlertDispatcherTests {
         // Recovers two minutes later.
         _ = dispatcher.dispatch([], now: start.addingTimeInterval(120))
 
-        // Returns as critical three minutes after that, well inside the cooldown.
+        // Returns as critical three minutes after that, well inside the
+        // cooldown.
         let notified = dispatcher.dispatch(
             [alert(.absenceHeadroom, .critical)], now: start.addingTimeInterval(300))
 
@@ -355,7 +357,8 @@ struct AlertDispatcherTests {
 
     /// An account whose fetch failed still gets its "data unavailable" alert
     /// dispatched. That alert must not make the account count as evaluated, or
-    /// its other alerts would look cleared and be announced again on its return.
+    /// its other alerts would look cleared and be announced again on its
+    /// return.
     @Test("an alert for an unevaluated account clears none of its others")
     func unevaluatedAlertClearsNothing() {
         let first = ChainPollerTests.filledAddress(0x21)
@@ -429,8 +432,9 @@ struct RewardsTrackerTests {
                 block(1, hoursAgo: 2, payout: 8_000_000),
                 block(2, hoursAgo: 20, payout: 8_000_000),
                 block(3, hoursAgo: 50, payout: 8_000_000),
-                block(4, hoursAgo: 200, payout: 8_000_000),  // 8.3 days, inside the
-            ], windowStartRound: 0)  // fetch window, outside 7d
+                // 8.3 days ago: inside the fetch window, outside the 7 days.
+                block(4, hoursAgo: 200, payout: 8_000_000),
+            ], windowStartRound: 0)
 
         let summary = tracker.summary(now: now)
         #expect(summary.proposals24h == 2)

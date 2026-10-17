@@ -77,14 +77,14 @@ public struct AlertDispatcher: Sendable, Equatable {
     /// severity it last notified at, when it comes back after staying gone for
     /// the cooldown, or when it has held for its reminder interval.
     ///
-    /// - Parameter evaluated: The accounts whose alerts this call describes, nil
-    ///   standing for the watch itself. An alert of an account that was not
-    ///   evaluated, because its fetch failed, has not cleared. An alert for such
-    ///   an account, such as one saying its data is unavailable, is dispatched
-    ///   like any other but clears nothing. No default is safe, so there is
-    ///   none: taking every account as evaluated would clear the alerts of a
-    ///   failed fetch, and taking the watch alone would never clear an
-    ///   account's.
+    /// - Parameter evaluated: The accounts whose alerts this call describes,
+    ///   nil standing for the watch itself. An alert of an account that was not
+    ///   evaluated, because its fetch failed, has not cleared. An alert for
+    ///   such an account, such as one saying its data is unavailable, is
+    ///   dispatched like any other but clears nothing. No default is safe, so
+    ///   there is none: taking every account as evaluated would clear the
+    ///   alerts of a failed fetch, and taking the watch alone would never clear
+    ///   an account's.
     public mutating func dispatch(
         _ alerts: [HealthAlert], evaluated: Set<AlgorandAddress?>, now: Date
     ) -> [HealthAlert] {
@@ -125,9 +125,9 @@ public struct AlertDispatcher: Sendable, Equatable {
         _ alerts: [HealthAlert], evaluated: Set<AlgorandAddress?>, now: Date
     ) {
         let present = Set(alerts.map(\.key))
-        // Only the evaluated accounts can have cleared. A failed fetch evaluates
-        // nothing for its account, and a sleeping Mac makes no call at all, so
-        // whatever held before still holds.
+        // Only the evaluated accounts can have cleared. A failed fetch
+        // evaluates nothing for its account, and a sleeping Mac makes no call
+        // at all, so whatever held before still holds.
         let gone = lastNotified.keys.filter {
             evaluated.contains($0.address) && !present.contains($0)
         }

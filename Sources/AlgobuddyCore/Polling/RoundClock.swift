@@ -12,11 +12,11 @@ public struct SystemDateProvider: DateProviding {
 /// Estimates wall-clock seconds per round by watching the round advance.
 ///
 /// Every countdown the UI shows (days of key validity, hours of absence
-/// headroom, minutes to a challenge deadline) is rounds multiplied by this. Once
-/// the rounds span half an hour, the estimate is the rate over that whole span.
-/// An anchor, a past round whose time a block's timestamp gives, provides such
-/// a span from the first poll. Without one the estimate starts at the nominal
-/// 2.8 s and moves towards the observed rate with every poll, so early
+/// headroom, minutes to a challenge deadline) is rounds multiplied by this.
+/// Once the rounds span half an hour, the estimate is the rate over that whole
+/// span. An anchor, a past round whose time a block's timestamp gives, provides
+/// such a span from the first poll. Without one the estimate starts at the
+/// nominal 2.8 s and moves towards the observed rate with every poll, so early
 /// countdowns on a chain with a different round time carry part of the nominal
 /// figure's error until the span is long enough.
 public struct RoundClock: Sendable, Equatable {

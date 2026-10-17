@@ -11,7 +11,8 @@ public struct ChainPollerConfig: Sendable {
     public var rewardsWindowDays: Double = 8
     public var minBackoff: TimeInterval = 5
     public var maxBackoff: TimeInterval = 300
-    /// Consecutive failures before the chain source itself is reported unhealthy.
+    /// Consecutive failures before the chain source itself is reported
+    /// unhealthy.
     public var failuresBeforeAlert = 3
     /// How long the failures must have been sustained before that alert fires.
     ///
@@ -26,7 +27,7 @@ public struct ChainPollerConfig: Sendable {
         self.addresses = addresses
     }
 
-    /// Convenience for the one-account case, which is most of them.
+    /// Convenience for watching a single account.
     public init(address: AlgorandAddress) {
         self.init(addresses: [address])
     }
@@ -60,12 +61,12 @@ public struct PollFailure: Sendable, Equatable {
 /// separate pollers would fetch the same two values over and over and keep as
 /// many round clocks, backoffs and update streams as there are accounts.
 ///
-/// Poll shape per cycle: one account fetch per address always; supply, challenge
-/// seed and rewards only when their own intervals lapse or the challenge window
-/// rolls. In the steady state that is one request per account every 30 s.
-/// Rewards run beside the cycles rather than inside one, so an indexer that is
-/// slow or unreachable never holds back the figures and alerts that come from
-/// algod.
+/// Poll shape per cycle: one account fetch per address always; supply,
+/// challenge seed and rewards only when their own intervals lapse or the
+/// challenge window rolls. In the steady state that is one request per account
+/// every 30 s. Rewards run beside the cycles rather than inside one, so an
+/// indexer that is slow or unreachable never holds back the figures and alerts
+/// that come from algod.
 public actor ChainPoller {
 
     public struct Update: Sendable {
@@ -80,11 +81,14 @@ public actor ChainPoller {
         public let alerts: [HealthAlert]
         /// The subset of `alerts` that should raise a notification now.
         public let notifications: [HealthAlert]
-        /// The first thing that went wrong, whichever account or shared stage
-        /// it belonged to. An entry's own failure is on the entry.
+        /// The failure that stands for the cycle: a shared stage's when one
+        /// failed, since it reaches every entry, and otherwise the first
+        /// failing account's in the configured order. An entry's own failure is
+        /// on the entry.
         public let failure: PollFailure?
         /// Notification times, for the caller to persist so cooldowns survive a
-        /// relaunch. See `AlertDispatcher.init(cooldown:lastNotified:lastSeverity:)`.
+        /// relaunch. See
+        /// `AlertDispatcher.init(cooldown:lastNotified:lastSeverity:)`.
         public let alertHistory: [AlertKey: Date]
         /// The severity each alert last notified at, persisted with
         /// `alertHistory` so escalation detection survives a relaunch too.
@@ -205,8 +209,8 @@ public actor ChainPoller {
 
     // MARK: - Lifecycle
 
-    /// Begins polling. No-op if already running, or if `stop()` has been called.
-    /// See `stop()` for why that is terminal.
+    /// Begins polling. No-op if already running, or if `stop()` has been
+    /// called. See `stop()` for why that is terminal.
     public func start() {
         guard !isStopped, pollTask == nil else { return }
         pollTask = Task { [weak self] in
@@ -221,17 +225,18 @@ public actor ChainPoller {
         }
     }
 
+    /// Whether a cycle is under way. See `runCycle()`.
+    private var cycleInFlight = false
+    /// The update most recently published, which a rewards answer arriving
+    /// between cycles is shown in. See `republishRewards()`.
+    private var lastPublished: Update?
+
     /// One cycle, atomically: poll, then publish, under a single in-flight
     /// guard shared by the loop and `refresh()`. The actor is reentrant at
     /// await points, so without this a refresh during the loop's suspended
     /// cycle (or the loop waking during a slow refresh) would run two cycles
     /// concurrently: duplicate requests, double-counted failures, and an
     /// older update publishing after a newer one.
-    private var cycleInFlight = false
-    /// The update most recently published, which a rewards answer arriving
-    /// between cycles is shown in. See `republishRewards()`.
-    private var lastPublished: Update?
-
     private func runCycle() async {
         guard !cycleInFlight else { return }
         cycleInFlight = true
@@ -244,16 +249,16 @@ public actor ChainPoller {
     /// Stops polling **permanently**. To resume, build a new poller.
     ///
     /// This is terminal because finishing the continuation ends the stream for
-    /// good: a subsequent `start()` would poll happily while `publish()` dropped
-    /// every update on the floor and each consumer's `for await` had already
-    /// exited: polling forever, showing nothing, reporting no error. The
-    /// `isStopped` flag makes that an explicit no-op instead.
+    /// good: a subsequent `start()` would poll happily while `publish()`
+    /// dropped every update on the floor and each consumer's `for await` had
+    /// already exited: polling forever, showing nothing, reporting no error.
+    /// The `isStopped` flag makes that an explicit no-op instead.
     ///
     /// It also closes an ordering race: two `apply()` calls in quick succession
     /// can enqueue `stop()` and `start()` on this actor with no guaranteed
-    /// order, and a `start()` running after its `stop()` would otherwise install
-    /// an orphaned poll loop that nothing holds a reference to and nothing can
-    /// cancel.
+    /// order, and a `start()` running after its `stop()` would otherwise
+    /// install an orphaned poll loop that nothing holds a reference to and
+    /// nothing can cancel.
     public func stop() {
         isStopped = true
         pollTask?.cancel()
@@ -269,15 +274,15 @@ public actor ChainPoller {
     /// Polls immediately **and publishes the result**, which is what a
     /// user-initiated refresh needs.
     ///
-    /// `pollOnce()` returns its Update to the caller and publishes nothing,
-    /// which is right for tests but wrong for a Refresh button: the poll ran,
-    /// consumed requests, advanced the round clock and, worst of all, recorded
-    /// dispatcher cooldowns, while the UI saw none of it and a notification
-    /// could be marked delivered without ever being shown.
+    /// `pollOnce()` returns its `Update` to the caller and publishes nothing,
+    /// which suits tests but not a Refresh button: the poll would consume
+    /// requests, advance the round clock and, worst of all, record dispatcher
+    /// cooldowns while the UI saw none of it, so a notification could be marked
+    /// delivered without ever being shown.
     public func refresh() async {
-        // Serialised against the loop through runCycle's guard: a refresh
-        // during an active cycle has nothing to offer, since that cycle's
-        // result is already on its way.
+        // Serialised against the loop through the guard in `runCycle()`: a
+        // refresh during an active cycle has nothing to offer, since that
+        // cycle's result is already on its way.
         guard !isStopped else { return }
         await runCycle()
     }
@@ -300,11 +305,11 @@ public actor ChainPoller {
 
     // MARK: - One cycle
 
-    /// Runs a single poll and returns the result. Split out from `start()` so
-    /// every behaviour below is testable without timers or sleeping. Callers
-    /// that publish go through `runCycle()`, which owns the in-flight guard.
-    /// A rewards fetch it starts answers after it: in the published update
-    /// again, or in the next one; see `rewardsSettled()`.
+    /// Runs a single poll and returns the result. Separate from the loop in
+    /// `start()`, so every behaviour below is testable without timers or
+    /// sleeping. Callers that publish go through `runCycle()`, which owns the
+    /// in-flight guard. A rewards fetch it starts answers after it: in the
+    /// published update again, or in the next one; see `rewardsSettled()`.
     @discardableResult
     func pollOnce() async -> Update {
         let now = dates.now
@@ -501,10 +506,9 @@ public actor ChainPoller {
     /// shows it at once. A failed query leaves the account's figures as they
     /// were and records why.
     ///
-    /// Shown in the last update, published again, rather than in a cycle run
-    /// at once: that cycle would give the round clock a sample over a second
-    /// or so, where one round more or less is most of the measurement, and
-    /// skew every countdown.
+    /// Shown in the last update, published again, rather than in a cycle run at
+    /// once, which would fetch every account again moments after the last cycle
+    /// did.
     private func receiveRewards(
         _ results: [(AlgorandAddress, Result<ProposalPage, any Error>)],
         windowStart: UInt64, round: UInt64, requestedAt: Date
@@ -834,7 +838,7 @@ public actor ChainPoller {
         }
     }
 
-    /// - Returns: the proposals, and whether the page budget was exhausted with
+    /// - Returns: The proposals, and whether the page budget was exhausted with
     ///   results still outstanding.
     private nonisolated static func fetchProposals(
         indexer: IndexerClient,
@@ -874,12 +878,13 @@ public actor ChainPoller {
     }
 
     /// Plain language, for the panel to show as-is. The request that failed is
-    /// identified by the failure's `stage` rather than by a raw path: a URL with
-    /// an address embedded in it is a log line, not something to read. The
+    /// identified by the failure's `stage` rather than by a raw path: a URL
+    /// with an address embedded in it is a log line, not something to read. The
     /// stage also decides what a status can mean, since the same 404 says one
     /// thing from the challenge block and another from the account.
     private func describe(_ error: any Error, at stage: PollFailure.Stage) -> String {
-        // Only the rewards stage asks the indexer; every other stage asks algod.
+        // Only the rewards stage asks the indexer; every other stage asks
+        // algod.
         let source = stage == .rewards ? "The indexer" : "The chain data source"
         let check = stage == .rewards ? "Check the indexer URL." : "Check the URL points at algod."
         guard let algodError = error as? AlgodError else {

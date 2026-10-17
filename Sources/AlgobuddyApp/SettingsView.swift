@@ -825,7 +825,7 @@ struct MenuBarMetricPicker: View {
     var body: some View {
         // Drawn once per render: the preview shows the image, and the readout,
         // the threshold and the caption all measure it.
-        let name = MenuBar.spokenName(health: model.health, text: model.menuBarFigures)
+        let name = model.menuBarName
         let item = MenuBarImage.render(
             symbol: model.health.symbol, text: model.menuBarText,
             maskWidth: model.menuBarMaskWidth, description: name)

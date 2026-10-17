@@ -187,9 +187,9 @@ final class AppModel {
     private let singleAddressKey = "address"
     private let accountNamesKey = "accountNames"
     private let menuBarShapesKey = "menuBarShapes"
-    /// The shape of the last figure each menu bar metric showed. See
-    /// `menuBarStandIn(_:)`.
-    private var menuBarShapes: [MenuBarMetric: String] = [:]
+    /// The shape of the last figure each menu bar metric showed, for its
+    /// stand-in.
+    private var menuBarShapes = MenuBarShapes()
 
     // MARK: - Derived state
 
@@ -217,131 +217,31 @@ final class AppModel {
         HealthLevel(worstOf: visibleAlerts.map(\.severity), hasData: display?.hasData == true)
     }
 
-    /// The menu bar text, in `allCases` order so it reads the same however the
-    /// checkboxes were clicked. Empty when nothing is selected, which is how
-    /// "icon only" is expressed.
-    ///
-    /// Read from the portfolio rather than from one account: the round is
-    /// shared by the cycle, the two countdowns show whichever account runs out
-    /// first, and the proposal figures are sums. With one account watched every
-    /// one of those is that account's own value.
-    ///
-    /// Every selected metric always takes its place, as its figure or, while it
-    /// has none, as a stand-in of about the same width. The panel hangs from
-    /// this item, and an item that changes width under an open panel moves
-    /// along the menu bar, which has the system place the panel again, at times
-    /// against the item's other edge. So the item keeps its width from launch,
-    /// onboarding included, to the first figures, give or take the few points
-    /// by which the menu bar's digits differ from one another.
-    var menuBarSegments: [String] {
-        MenuBarMetric.allCases.filter(metrics.contains).map { metric in
-            menuBarFigure(metric) ?? menuBarStandIn(metric)
-        }
-    }
+    /// The menu bar item's text. See `MenuBarText`.
+    var menuBarText: String? { menuBar.text }
 
-    var menuBarText: String? {
-        let segments = menuBarSegments
-        return segments.isEmpty ? nil : segments.joined(separator: MenuBar.separator)
-    }
-
-    /// The menu bar's figures without the stand-ins, for VoiceOver, which
-    /// would read a stand-in out dash by dash.
-    var menuBarFigures: String? {
-        let figures = MenuBarMetric.allCases.filter(metrics.contains).compactMap {
-            menuBarFigure($0)
-        }
-        return figures.isEmpty ? nil : figures.joined(separator: MenuBar.separator)
-    }
+    /// What VoiceOver calls the menu bar item.
+    var menuBarName: String { menuBar.spokenName(health: health.label) }
 
     /// How wide the mask over the earnings is drawn: as wide as the figure it
     /// hides, or as that figure's stand-in, so hiding values moves neither the
     /// item nor the panel that hangs from it.
-    var menuBarMaskWidth: CGFloat? {
-        guard valuesHidden, metrics.contains(.earned24h) else { return nil }
-        let hidden = unmaskedFigure(.earned24h) ?? standInShape(.earned24h)
-        return MenuBarImage.width(of: hidden.replacingOccurrences(of: " \(MenuBar.algo)", with: ""))
-    }
+    var menuBarMaskWidth: CGFloat? { menuBar.textUnderMask.map(MenuBarImage.width(of:)) }
 
-    /// A metric's figure from the data on display, masked while values are
-    /// hidden, or nil while it has none.
-    private func menuBarFigure(_ metric: MenuBarMetric) -> String? {
-        guard metric == .earned24h, valuesHidden else { return unmaskedFigure(metric) }
-        return unmaskedFigure(metric).map { _ in Self.maskedEarned }
-    }
-
-    /// A metric's figure as it reads with values shown, or nil while it has
-    /// none.
-    private func unmaskedFigure(_ metric: MenuBarMetric) -> String? {
-        guard let update = display else { return nil }
-        let portfolio = update.portfolio
-        // Silent unless every account's proposals are current, so neither a
-        // pending fetch nor a failed one can pass for the total, least of all
-        // as "no blocks today". The panel still shows the figures, and says
-        // why they are partial.
-        let showsRewards = portfolio.hasRewards && !portfolio.isPartial
-        switch metric {
-        case .round:
-            // "#" marks it as an index rather than a quantity.
-            return update.currentRound.map { "#" + Format.round($0) }
-        case .absenceHeadroom:
-            return portfolio.closestAbsenceHeadroom.map(Format.duration)
-        case .keyExpiry:
-            return portfolio.closestKeyExpiry.map(Format.duration)
-        case .proposals24h:
-            return showsRewards ? "\(portfolio.proposals24h) blk" : nil
-        case .earned24h:
-            guard showsRewards else { return nil }
-            return "\(Format.algos(portfolio.earned24h, decimals: 1)) \(MenuBar.algo)"
-        }
-    }
-
-    /// What a metric shows while it has no figure: the shape of the last figure
-    /// it showed, remembered across launches, so the stand-in has as many
-    /// digits as the figure it waits for. Before any, the shape of a typical
-    /// one.
-    private func menuBarStandIn(_ metric: MenuBarMetric) -> String {
-        // The mask hides any figure, so it stands in for one as well.
-        if metric == .earned24h, valuesHidden { return Self.maskedEarned }
-        return standInShape(metric)
-    }
-
-    private func standInShape(_ metric: MenuBarMetric) -> String {
-        menuBarShapes[metric] ?? FigureShape.of(Self.typicalFigure(metric)) ?? ""
-    }
-
-    /// Masked rather than dropped: removing the segment would shrink the item
-    /// and shove every icon to its left along. The image sets the bullets as
-    /// wide as the figure they hide; see `menuBarMaskWidth`.
-    private static let maskedEarned = "\(Format.hidden(4)) \(MenuBar.algo)"
-
-    /// A figure of the usual width for each metric, whose shape stands in for
-    /// it before the first figure.
-    private static func typicalFigure(_ metric: MenuBarMetric) -> String {
-        switch metric {
-        case .round: "#66.04M"
-        case .absenceHeadroom: "9.8d"
-        case .keyExpiry: "87.1d"
-        case .proposals24h: "3 blk"
-        case .earned24h: "8.2 \(MenuBar.algo)"
-        }
+    private var menuBar: MenuBarText {
+        MenuBarText(
+            metrics: metrics, round: display?.currentRound, portfolio: display?.portfolio,
+            valuesHidden: valuesHidden, shapes: menuBarShapes)
     }
 
     /// Remembers the shape of each figure the menu bar shows, for its stand-in
     /// after a relaunch. Written only when one changes, as when a figure gains
     /// a digit, and never the figure itself.
     private func rememberMenuBarShapes() {
-        var changed = false
-        for metric in MenuBarMetric.allCases where metrics.contains(metric) {
-            guard let figure = menuBarFigure(metric), let shape = FigureShape.of(figure),
-                menuBarShapes[metric] != shape
-            else { continue }
-            menuBarShapes[metric] = shape
-            changed = true
-        }
-        guard changed else { return }
-        UserDefaults.standard.set(
-            Dictionary(uniqueKeysWithValues: menuBarShapes.map { ($0.key.rawValue, $0.value) }),
-            forKey: menuBarShapesKey)
+        let shapes = menuBar.rememberedShapes
+        guard shapes != menuBarShapes else { return }
+        menuBarShapes = shapes
+        UserDefaults.standard.set(shapes.stored, forKey: menuBarShapesKey)
     }
 
     // MARK: - Launch at login
@@ -516,15 +416,8 @@ final class AppModel {
         }
         notificationsEnabled = defaults.object(forKey: "notifications") as? Bool ?? true
         valuesHidden = defaults.bool(forKey: "valuesHidden")
-        // Only what can stand in for a figure, since it goes into the menu bar
-        // as it is.
-        let shapes = defaults.dictionary(forKey: menuBarShapesKey) as? [String: String] ?? [:]
-        menuBarShapes = Dictionary(
-            uniqueKeysWithValues: shapes.compactMap { key, shape in
-                guard let metric = MenuBarMetric(rawValue: key), FigureShape.isShape(shape)
-                else { return nil }
-                return (metric, shape)
-            })
+        menuBarShapes = MenuBarShapes(
+            stored: defaults.dictionary(forKey: menuBarShapesKey) as? [String: String] ?? [:])
         log.info(
             "load: bundle=\(Bundle.main.bundleIdentifier ?? "nil") addresses=\(stored.count)"
         )

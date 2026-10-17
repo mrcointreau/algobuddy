@@ -72,6 +72,21 @@ struct UpdateCheckerTests {
         #expect(fetcher.requests == [Self.endpoint.absoluteString])
     }
 
+    /// SECURITY.md names this the one request that leaves the configured
+    /// hosts, and says it carries no token, so the address the app's checker
+    /// asks and the headers it sends are pinned here. The session adds only
+    /// its user agent; see `PrivateSessionTests`.
+    @Test("the app's checker asks api.github.com for this repository's latest release")
+    func defaultEndpoint() async {
+        let fetcher = StubFetcher()
+        fetcher.route("releases/latest", json: Self.release(tag: "v1.0.1"))
+
+        _ = await UpdateChecker(fetcher: fetcher).check(runningVersion: "1.0.1")
+
+        #expect(fetcher.requests == [Self.endpoint.absoluteString])
+        #expect(fetcher.requestHeaders == [["Accept": "application/vnd.github+json"]])
+    }
+
     // MARK: - Release builds
 
     @Test("an older release build is offered the newer version and its link")

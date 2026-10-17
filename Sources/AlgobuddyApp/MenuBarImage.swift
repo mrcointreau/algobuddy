@@ -1,7 +1,8 @@
+import AlgobuddyCore
 import AppKit
 
 /// The menu bar item as one template image: the health symbol, then the
-/// metrics, with the Algorand mark wherever the text has `MenuBar.algo`.
+/// metrics, with the Algorand mark wherever the text has `MenuBarText.algo`.
 ///
 /// A menu bar extra hands its label to the status item as one image and one
 /// plain title. An image inside a `Text` arrives there as an empty attachment,
@@ -43,7 +44,7 @@ enum MenuBarImage {
         let symbol = NSImage(systemSymbolName: name, accessibilityDescription: nil) ?? NSImage()
 
         let font = Self.font
-        let lines = text.components(separatedBy: MenuBar.algo).map {
+        let lines = text.components(separatedBy: MenuBarText.algo).map {
             line($0, font: font, maskWidth: maskWidth)
         }
         let textWidth =

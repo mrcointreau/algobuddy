@@ -13,8 +13,8 @@ enum HealthLevel: Int, Comparable {
     /// image and strips the tint entirely: a warning shows as a *white*
     /// triangle, not an orange one. The symbol therefore has to carry the whole
     /// signal, which is also what makes it readable to anyone who cannot
-    /// distinguish the colours. The tint below still applies in the Settings
-    /// preview, where it is not templated.
+    /// distinguish the colours. The tint below still applies in the panel's
+    /// account rows, which are not templated.
     var symbol: String {
         switch self {
         case .unknown: "circle.dotted"
@@ -224,29 +224,36 @@ enum MenuBarMetric: String, CaseIterable, Identifiable {
 enum MenuBar {
     /// Where the menu bar text has ALGO, which `MenuBarImage` draws as the
     /// Algorand mark. The text keeps a letter there, U+023A, the one the mark
-    /// is often typed as, because the text is also measured for the width
-    /// estimate and stored as the remembered shapes. The panel spells out
-    /// "ALGO" instead, where there is room for it.
+    /// is often typed as, because the text is also stored as the remembered
+    /// shapes, and `spokenName` reads it out as ALGO. The panel shows the mark
+    /// too, through `Text(algos:style:)`.
     static let algo = "\u{023A}"
 
     /// Separator between metrics. Narrow, and the standard macOS way to run
     /// several facts together on one line.
     static let separator = " · "
 
-    /// Roughly how wide the item will be, measured with the real menu font plus
-    /// the health glyph and its padding.
+    /// The item's name for VoiceOver: the app and its health, then the metrics,
+    /// with the unit as a word and the metrics as a list, where the text has a
+    /// letter and a dot that would be read aloud as such.
+    static func spokenName(health: HealthLevel, text: String?) -> String {
+        let metrics = text.map {
+            $0.replacingOccurrences(of: algo, with: "ALGO")
+                .replacingOccurrences(of: separator, with: ", ")
+        }
+        return ["algobuddy: \(health.label)", metrics].compactMap { $0 }.joined(separator: ", ")
+    }
+
+    /// How wide the item is: its image, and the room the status item leaves
+    /// around an image, measured at about 8 points either side.
     ///
     /// Shown in Settings because the selection is uncapped: a wide item is not
     /// clipped, it is **hidden entirely** behind the notch, with nothing to
     /// indicate why. Better to see the number than to lose the icon.
-    static func estimatedWidth(_ text: String) -> CGFloat {
-        let font = NSFont.menuFont(ofSize: 0)
-        let width = (text as NSString).size(withAttributes: [.font: font]).width
-        return width + 22  // glyph plus the item's own padding
-    }
+    static func width(of image: NSImage) -> CGFloat { image.size.width + 16 }
 
     /// Past this, a crowded menu bar starts dropping items.
-    static let comfortableWidth: CGFloat = 120
+    static let comfortableWidth: CGFloat = 136
 }
 
 enum Format {
@@ -258,8 +265,8 @@ enum Format {
     /// The panel's ALGO amount, or its mask: the one place the two compose, so
     /// every money surface masks identically. The menu bar builds its own
     /// narrower form because its width budget is different, deliberately.
-    static func algosLabel(_ amount: MicroAlgos, hidden: Bool, decimals: Int = 2) -> String {
-        hidden ? "\(Self.hidden()) ALGO" : "\(algos(amount, decimals: decimals)) ALGO"
+    static func algosLabel(_ amount: MicroAlgos, hidden: Bool) -> String {
+        hidden ? "\(Self.hidden()) ALGO" : "\(algos(amount, decimals: 2)) ALGO"
     }
 
     /// An amount where a row has little room for it: in millions from ten

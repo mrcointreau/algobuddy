@@ -60,10 +60,9 @@ struct OnboardingView: View {
 /// A `TabView` in a Settings scene is what gives the native settings window: a
 /// toolbar of panes that always shows the active one, and a window titled
 /// after that pane. Each pane is a `Form` with `.formStyle(.grouped)`, which is
-/// what gives the native System Settings appearance: right-aligned leading
-/// labels in a consistent column, grouped sections, correct control sizing.
-/// Hand-rolling the layout gives labels of differing widths and fields that do
-/// not line up.
+/// what gives the native System Settings appearance: grouped sections and
+/// correct control sizing. Where a pane sets text fields beside their labels,
+/// a `Grid` holds the labels in one column, so the fields line up.
 ///
 /// Changes take effect as they are made, as macOS settings do, rather than
 /// behind an Apply button. Text fields commit on Return, on focus loss, on a
@@ -149,18 +148,16 @@ private struct AccountsPane: View {
     /// `AddressField` also serves onboarding, which asks for no name.
     @FocusState private var focusedName: AddressDraft.ID?
 
-    /// The rows that name an account an earlier row already names. Compared as
-    /// addresses rather than as text, so a repeat pasted in another case is
-    /// still caught. Silently watching such a row once and showing it twice
-    /// here would leave the user with no way to tell why nothing happened.
+    /// The rows that name an account an earlier row already watches, by the
+    /// rule the list is resolved by, so a row the watch drops is marked here
+    /// too. Compared as addresses rather than as text, so a repeat pasted in
+    /// another case is still caught. Silently watching such a row once and
+    /// showing it twice here would leave the user with no way to tell why
+    /// nothing happened.
     private var repeats: Set<AddressDraft.ID> {
-        var seen = Set<AlgorandAddress>()
-        var found = Set<AddressDraft.ID>()
-        for draft in model.addressDrafts {
-            guard let address = try? AlgorandAddress(draft.text) else { continue }
-            if !seen.insert(address).inserted { found.insert(draft.id) }
-        }
-        return found
+        let drafts = model.addressDrafts
+        let rows = drafts.map { WatchList.Row(text: $0.text, held: $0.held) }
+        return Set(WatchList.repeats(rows).map { drafts[$0].id })
     }
 
     /// The only row, holding no text, no name and no account. It is where the
@@ -433,8 +430,8 @@ private struct FitsScreenHeight: ViewModifier {
 ///
 /// SwiftUI has no window lifecycle to hook from a Settings scene, so the
 /// window is reached through an invisible AppKit view planted behind the
-/// panes. Every observation is scoped to that one window, so the panel opening
-/// and closing all day never triggers a commit.
+/// panes. The commit observes that one window only, so the panel opening and
+/// closing all day never triggers it.
 private struct SettingsWindowKeeper: NSViewRepresentable {
     /// Receives the tallest a pane can be on the window's screen.
     let onHeightLimit: (CGFloat) -> Void
@@ -822,11 +819,12 @@ struct MenuBarMetricPicker: View {
     @Bindable var model: AppModel
 
     var body: some View {
-        // Measured once per render: estimatedWidth is a font lookup plus a text
-        // measurement, and the readout, the threshold and the caption all want
-        // the same number.
-        let sample = model.menuBarWidthSample
-        let width = MenuBar.estimatedWidth(sample)
+        // Drawn once per render: the preview shows the image, and the readout,
+        // the threshold and the caption all measure it.
+        let name = MenuBar.spokenName(health: model.health, text: model.menuBarFigures)
+        let item = MenuBarImage.render(
+            symbol: model.health.symbol, text: model.menuBarText, description: name)
+        let width = MenuBar.width(of: item)
         let isWide = width > MenuBar.comfortableWidth
 
         VStack(alignment: .leading, spacing: 6) {
@@ -855,9 +853,8 @@ struct MenuBarMetricPicker: View {
                 // The menu bar's own image, so the preview is the item exactly.
                 // Before the first poll it shows the stand-ins the menu bar
                 // shows, which are about as wide as the figures to come.
-                Image(
-                    nsImage: MenuBarImage.render(
-                        symbol: model.health.symbol, text: model.menuBarText))
+                Image(nsImage: item)
+                    .accessibilityLabel(name)
                 Spacer()
                 Text("≈\(Int(width)) pt")
                     .font(Typography.secondary).monospacedDigit()

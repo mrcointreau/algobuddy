@@ -45,7 +45,10 @@ struct ChainPollerTests {
                 lastProposed: lastSeen, lastHeartbeat: lastSeen - 1_000,
                 voteFirstValid: 63_308_451, voteLastValid: 66_085_593))
         stub.route("/v2/ledger/supply", json: JSONBuilder.supply(round: round))
-        stub.route("/v2/blocks/", json: JSONBuilder.blockHeader(round: 64_030_000, seed: seed))
+        // The block that opens the round's challenge window, which is the one
+        // the seed request asks for.
+        stub.route(
+            "/v2/blocks/", json: JSONBuilder.blockHeader(round: round / 1_000 * 1_000, seed: seed))
     }
 
     /// Polls, waits for the rewards fetch that poll started, and polls again
@@ -169,10 +172,11 @@ struct ChainPollerTests {
         // Cross into the next 1000-round window.
         standardRoutes(stub, round: 64_031_050, seed: nonMatchingSeed)
         clock.advance(30)
-        _ = await poller.pollOnce()
+        let rolled = await poller.pollOnce()
 
         #expect(stub.requestCount(containing: "/v2/blocks/64030000") == 1)
         #expect(stub.requestCount(containing: "/v2/blocks/64031000") == 1)
+        #expect(rolled.failure == nil)
     }
 
     // MARK: - Failure handling
@@ -441,6 +445,66 @@ struct ChainPollerTests {
         #expect(update.failure?.message.contains("only contacts the configured hosts") == true)
     }
 
+    /// The panel shows these strings verbatim, so each names its source and,
+    /// where the failure has a known meaning, says it rather than a status.
+    @Test("an algod failure reads as what it means")
+    func algodFailureMessages() async throws {
+        struct NotHTTP: HTTPFetching {
+            func get(
+                _ url: URL, headers: [String: String], timeout: TimeInterval
+            ) async throws -> (Data, Int) {
+                throw AlgodError.notHTTP
+            }
+        }
+        func message(_ fetcher: any HTTPFetching) async -> String? {
+            let poller = ChainPoller(
+                config: ChainPollerConfig(address: address),
+                algod: AlgodClient(
+                    baseURL: URL(string: "https://chain.example")!, fetcher: fetcher),
+                dates: TestClock())
+            let update = await poller.pollOnce()
+            return update.failure?.message
+        }
+        func answering(_ status: Int, body: String = "{}") -> StubFetcher {
+            let stub = StubFetcher()
+            stub.route("/v2/accounts/", status: status, json: body)
+            return stub
+        }
+        let offline = StubFetcher()
+        offline.setFailing(true)
+
+        let tokenRequired =
+            "The chain data source requires a token. Public providers serve it without one."
+        let unexpected =
+            "The chain data source returned an unexpected response. Check the URL points at algod."
+        let serverError = "The chain data source returned an error (503)."
+        let notHTTP = "The chain data source did not return an HTTP response."
+        #expect(await message(answering(401)) == tokenRequired)
+        #expect(await message(answering(200, body: "<html></html>")) == unexpected)
+        #expect(await message(answering(503)) == serverError)
+        #expect(await message(NotHTTP()) == notHTTP)
+        #expect(await message(offline) == "The chain data source could not be reached.")
+    }
+
+    /// The indexer's statuses map as algod's do, so its 401 and 404 say what
+    /// they mean there, and name the indexer.
+    @Test("an indexer failure reads as what it means")
+    func indexerFailureMessages() async throws {
+        func message(status: Int) async -> String? {
+            let stub = StubFetcher()
+            let clock = TestClock()
+            standardRoutes(stub, seed: nonMatchingSeed)
+            stub.route("/v2/block-headers", status: status, json: "{}")
+            let update = await pollAfterRewards(
+                makePoller(stub: stub, clock: clock, withIndexer: true), clock: clock)
+            return update.only?.failure?.message
+        }
+        let tokenRequired = "The indexer requires a token. Public providers serve it without one."
+        let noEndpoint = "The indexer has no such endpoint. Check the indexer URL."
+        #expect(await message(status: 401) == tokenRequired)
+        #expect(await message(status: 404) == noEndpoint)
+    }
+
     /// A seed is only meaningful for the window it was fetched for. Evaluating a
     /// stale one manufactures a critical "challenged and not answered" for a
     /// window that closed long ago.
@@ -562,11 +626,54 @@ struct ChainPollerTests {
 
         let first = await poller.pollOnce()
         #expect(first.failure?.stage == .challengeSeed)
+        let noSeed =
+            "The chain data source returned a block header without a seed, so challenge monitoring is paused."
+        #expect(first.failure?.message == noSeed)
         #expect(first.only?.challenge == nil)
 
         clock.advance(30)
         _ = await poller.pollOnce()
         #expect(stub.requestCount(containing: "/v2/blocks/64030000") == 2)
+    }
+
+    /// Another block's seed would select other accounts than the challenge
+    /// does. Here it selects this one, which was last seen before the
+    /// challenge round, so taking it would raise a false challenge.
+    @Test("a header for another round is not taken as the challenge block")
+    func headerForAnotherRoundIsRefused() async throws {
+        let stub = StubFetcher()
+        let clock = TestClock()
+        standardRoutes(stub, round: 64_030_160, seed: matchingSeed, lastSeen: 64_029_500)
+        stub.route(
+            "/v2/blocks/", json: JSONBuilder.blockHeader(round: 64_029_000, seed: matchingSeed))
+        let poller = makePoller(stub: stub, clock: clock)
+
+        let first = await poller.pollOnce()
+        #expect(first.failure?.stage == .challengeSeed)
+        let otherBlock =
+            "The chain data source returned a block other than the challenge block, so challenge monitoring is paused."
+        #expect(first.failure?.message == otherBlock)
+        #expect(first.only?.challenge == nil)
+        #expect(!first.alerts.contains { $0.id == .challengeFailing })
+
+        clock.advance(30)
+        _ = await poller.pollOnce()
+        #expect(stub.requestCount(containing: "/v2/blocks/64030000") == 2)
+    }
+
+    /// A header that leaves out its round cannot be checked against the round
+    /// asked for, so it is taken as that round's, and its seed challenges.
+    @Test("a header without its round is taken as the challenge block")
+    func headerWithoutRoundIsTaken() async throws {
+        let stub = StubFetcher()
+        let clock = TestClock()
+        standardRoutes(stub, round: 64_030_160, seed: matchingSeed, lastSeen: 64_029_500)
+        stub.route("/v2/blocks/", json: JSONBuilder.blockHeader(round: nil, seed: matchingSeed))
+
+        let update = await makePoller(stub: stub, clock: clock).pollOnce()
+
+        #expect(update.failure == nil)
+        #expect(update.only?.challenge?.isFailing == true)
     }
 
     /// Before the indexer has answered once there is no rewards data, and zero
@@ -767,7 +874,9 @@ struct ChainPollerTests {
         await poller.rewardsSettled()
 
         let request = try #require(stub.requests.first { $0.contains("/v2/block-headers") })
-        #expect(request.contains("min-round="))
+        // Eight days back at the nominal round time, which the first poll has.
+        let windowStart = 64_030_100 - UInt64(8 * 86_400 / RoundClock.nominal)
+        #expect(request.contains("min-round=\(windowStart)"))
         #expect(request.contains("proposers=\(Self.addressString)"))
     }
 
@@ -1119,10 +1228,9 @@ struct ChainPollerTests {
         // 3 days and 4 hours after the first poll.
         let lastValid = first + UInt64((3 * 86_400 + 4 * 3_600) / 2.8)
         stub.route("/v2/ledger/supply", json: JSONBuilder.supply(round: first))
-        stub.route(
-            "/v2/blocks/", json: JSONBuilder.blockHeader(round: first, seed: nonMatchingSeed))
 
         var notified = [AlertSeverity]()
+        var failures = [PollFailure]()
         for poll in 0..<(6 * 120) {
             let round = first + UInt64(Double(poll) * 30 / 2.8)
             stub.route(
@@ -1130,12 +1238,17 @@ struct ChainPollerTests {
                 json: JSONBuilder.account(
                     address: Self.addressString, round: round, lastProposed: round - 50,
                     voteFirstValid: first, voteLastValid: lastValid))
+            stub.route(
+                "/v2/blocks/",
+                json: JSONBuilder.blockHeader(round: round / 1_000 * 1_000, seed: nonMatchingSeed))
             let update = await poller.pollOnce()
             notified += update.notifications.filter { $0.id == .keyExpiry }.map(\.severity)
+            failures += update.failure.map { [$0] } ?? []
             clock.advance(30)
         }
 
         #expect(notified == [.warning, .critical])
+        #expect(failures.isEmpty)
     }
 
     // MARK: - Streaming
@@ -1210,7 +1323,8 @@ struct ChainPollerTests {
     func sharedRoutes(_ stub: StubFetcher, round: UInt64 = 64_030_100) {
         stub.route("/v2/ledger/supply", json: JSONBuilder.supply(round: round))
         stub.route(
-            "/v2/blocks/", json: JSONBuilder.blockHeader(round: 64_030_000, seed: nonMatchingSeed))
+            "/v2/blocks/",
+            json: JSONBuilder.blockHeader(round: round / 1_000 * 1_000, seed: nonMatchingSeed))
     }
 
     @Test("a cycle produces one entry per watched address")
@@ -1236,6 +1350,54 @@ struct ChainPollerTests {
         #expect(stub.requestCount(containing: "/v2/ledger/supply") == 1)
         #expect(stub.requestCount(containing: "/v2/blocks/64030000") == 1)
         #expect(stub.requestCount(containing: "/v2/blocks/64029200") == 1)
+    }
+
+    /// The Attention card lists the alerts as they come, and notifications go
+    /// out in the same order: the most severe first, and equally severe ones
+    /// in the order the accounts are watched in.
+    @Test("alerts come most severe first, then in watch order")
+    func alertsBySeverityThenWatchOrder() async throws {
+        let stub = StubFetcher()
+        let clock = TestClock()
+        let second = Self.filledAddress(0x11)
+        let third = Self.filledAddress(0x12)
+        // Six tenths of the allowable lag, so the headroom is low but not near.
+        accountRoute(stub, address, lastSeen: 64_030_100 - 151_213)
+        accountRoute(stub, second, status: "Offline")
+        accountRoute(stub, third, status: "Offline")
+        sharedRoutes(stub)
+
+        let update = await makePoller(
+            stub: stub, clock: clock, addresses: [address, second, third]
+        ).pollOnce()
+
+        let expected: [AlgorandAddress?] = [second, third, address]
+        #expect(update.alerts.map(\.address) == expected)
+        #expect(update.alerts.map(\.id) == [.accountOffline, .accountOffline, .absenceHeadroom])
+        #expect(update.notifications.map(\.address) == expected)
+    }
+
+    /// Each account is evaluated at its own round, and a lagging backend can
+    /// answer for one from the window before the seed's. That account has not
+    /// reached the seed's challenge round, so the seed cannot challenge it.
+    @Test("an account behind the seed's window is not evaluated against it")
+    func accountBehindTheSeedWindow() async throws {
+        let stub = StubFetcher()
+        let clock = TestClock()
+        let behind = Self.filledAddress(0x31)
+        accountRoute(stub, address, round: 64_035_100, lastSeen: 64_035_050)
+        accountRoute(stub, behind, round: 64_034_900, lastSeen: 64_034_100)
+        sharedRoutes(stub, round: 64_035_100)
+        // The seed of window 64,035,000 selects the lagging account.
+        let seed = Data([behind.publicKey[0]] + [UInt8](repeating: 0, count: 31))
+        stub.route("/v2/blocks/", json: JSONBuilder.blockHeader(round: 64_035_000, seed: seed))
+
+        let update = await makePoller(stub: stub, clock: clock, addresses: [address, behind])
+            .pollOnce()
+
+        #expect(update.entry(for: address)?.challenge != nil)
+        #expect(update.entry(for: behind)?.account != nil)
+        #expect(update.entry(for: behind)?.challenge == nil)
     }
 
     /// One address that cannot be fetched must not stop the others being
@@ -1520,8 +1682,8 @@ struct ChainPollerTests {
             })
     }
 
-    /// The one-account case is the common one, and it must behave exactly as it
-    /// did before several were possible.
+    /// The one-account case is the common one, so it must cost no more than
+    /// its one account: one entry, one account request, a portfolio of one.
     @Test("a single address produces exactly one entry")
     func singleAddressIsOneEntry() async throws {
         let stub = StubFetcher()
@@ -1546,7 +1708,11 @@ struct ChainPollerTests {
         let clock = TestClock()
         stub.route("/v2/accounts/", body: try Fixture.data("mainnet-account.json"))
         stub.route("/v2/ledger/supply", body: try Fixture.data("mainnet-supply.json"))
-        stub.route("/v2/blocks/", body: try Fixture.data("mainnet-block-64030256.json"))
+        // No block was captured at the challenge round, 64,030,000, and a
+        // header for another round is refused, so this one is built. The
+        // captured headers are decoded on their own in the model tests.
+        stub.route(
+            "/v2/blocks/", json: JSONBuilder.blockHeader(round: 64_030_000, seed: nonMatchingSeed))
 
         let update = await makePoller(stub: stub, clock: clock).pollOnce()
 

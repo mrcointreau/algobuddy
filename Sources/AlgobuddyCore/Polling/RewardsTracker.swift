@@ -28,7 +28,6 @@ public struct RewardsSummary: Sendable, Equatable {
 /// requests per hour against a public endpoint.
 public struct RewardsTracker: Sendable, Equatable {
     private var blocks: [UInt64: IndexerClient.ProposedBlock] = [:]
-    public private(set) var windowStartRound: UInt64?
 
     public init() {}
 
@@ -41,18 +40,16 @@ public struct RewardsTracker: Sendable, Equatable {
     ///   one would move `highestRound` past every real proposal still to come,
     ///   and the incremental fetch would never ask for them.
     public mutating func ingest(
-        _ proposed: [IndexerClient.ProposedBlock], windowStartRound: UInt64?,
+        _ proposed: [IndexerClient.ProposedBlock], windowStartRound: UInt64,
         latestRound: UInt64? = nil
     ) {
         for block in proposed where latestRound.map({ block.round <= $0 }) ?? true {
             blocks[block.round] = block
         }
-        if let windowStartRound {
-            self.windowStartRound = windowStartRound
-            // Drop anything older than the window being claimed, so a summary
-            // never mixes a wider earlier history into the current span.
-            blocks = blocks.filter { $0.key >= windowStartRound }
-        }
+        // The fetch window is wider than the 7 days the summary counts, so a
+        // block before it would not show anyway. Dropping it keeps the cache
+        // to the window, rather than every block seen since launch.
+        blocks = blocks.filter { $0.key >= windowStartRound }
     }
 
     /// The newest round in the cache, so an incremental fetch can resume past

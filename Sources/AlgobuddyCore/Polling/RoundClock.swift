@@ -59,14 +59,17 @@ public struct RoundClock: Sendable, Equatable {
 
     public mutating func observe(round: UInt64, at date: Date) {
         extendSpan(round: round, at: date)
-        guard let previousRound = lastRound,
-            let previousDate = lastObservedAt,
-            round > previousRound
-        else {
+        guard let previousRound = lastRound, let previousDate = lastObservedAt else {
             lastRound = round
             lastObservedAt = date
             return
         }
+        // A round that does not advance is neither a sample nor a new start. A
+        // lagging backend's older round would count rounds the chain made
+        // before the time recorded with it, and the same round seen again
+        // would move the start past the moment that round began: either makes
+        // the next sample too short.
+        guard round > previousRound else { return }
         // Too few rounds to measure, as when a refresh lands seconds after a
         // poll: a sample over three rounds can be a third off, and would move
         // every countdown by part of that. The earlier observation stays the

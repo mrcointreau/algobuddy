@@ -3,8 +3,8 @@ import Testing
 
 @testable import AlgobuddyCore
 
-/// Vectors generated with OpenSSL via Python's `hashlib.new("sha512_256", …)`.
-/// The `abc` digest is also the published FIPS 180-4 example.
+/// Vectors generated with OpenSSL (`openssl dgst -sha512-256`). The `abc`
+/// digest is also the published FIPS 180-4 example.
 @Suite("SHA-512/256")
 struct SHA512_256Tests {
 
@@ -30,20 +30,23 @@ struct SHA512_256Tests {
     }
 
     /// Exercises the padding branches: exactly at, one below, and one above the
-    /// 112-byte boundary where an extra compression block is required.
-    @Test("padding boundaries", arguments: [0, 1, 55, 111, 112, 113, 127, 128, 129, 255])
-    func lengths(_ length: Int) {
-        let digest = SHA512_256.hash([UInt8](repeating: 0x61, count: length))
-        #expect(digest.count == 32)
-    }
-
-    @Test("112-byte input crosses into a second block")
-    func boundary() {
-        // Python: hashlib.new("sha512_256", b"a"*112).hexdigest()
-        #expect(SHA512_256.hash([UInt8](repeating: 0x61, count: 112)).hexString.count == 64)
-        // Distinct inputs must not collide across the boundary.
-        #expect(
-            SHA512_256.hash([UInt8](repeating: 0x61, count: 111))
-                != SHA512_256.hash([UInt8](repeating: 0x61, count: 112)))
+    /// 112-byte boundary where an extra compression block is required, and
+    /// around the 128-byte block itself. The input is that many "a" bytes.
+    @Test(
+        "padding boundaries",
+        arguments: [
+            (0, "c672b8d1ef56ed28ab87c3622c5114069bdd3ad7b8f9737498d0c01ecef0967a"),
+            (1, "455e518824bc0601f9fb858ff5c37d417d67c2f8e0df2babe4808858aea830f8"),
+            (55, "f6513468f05e7cec7d52fc337ef79dfa7c82520268d3aeba4002ead9a5642916"),
+            (111, "0239e429f98d0ed61ee8e2a7c30afe98c1c3a80ce5dff62a107e9c538f7632ce"),
+            (112, "9216b5303edb66504570bee90e48ea5beaa5e9fe9f760bbd3e0460559fc005f6"),
+            (113, "d0ac79bea5bc97ac80c77c7cbbe92811ba9997eb0ce3c9888f9cef8362d187cd"),
+            (127, "2fe3b2a6ee7e12f6fe4ba82166541ad9b4ed882c493581cbe300d68f3757b778"),
+            (128, "b88f97e274f9c1d49f181c8cbd01a9c74930ad055a46ac4499a1d601f1c80bf2"),
+            (129, "fb9035c9009ed4a60e37510339ebdb1c771339f30aa581d5dea3690a524c23f1"),
+            (255, "3c07343720a65d00043af3a6514586dde8602a68b7cebde6bd8ffa48ba37afef"),
+        ])
+    func lengths(length: Int, digest: String) {
+        #expect(SHA512_256.hash([UInt8](repeating: 0x61, count: length)).hexString == digest)
     }
 }

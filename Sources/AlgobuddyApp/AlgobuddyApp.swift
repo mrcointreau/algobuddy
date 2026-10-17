@@ -48,7 +48,11 @@ struct MenuBarLabel: View {
         // One image, which is the only way the Algorand mark can sit in the
         // text. Its digits are the font's own, where a 1 is narrower than an
         // 8, which is why the stand-ins in AppModel allow for a few points.
-        Image(nsImage: MenuBarImage.render(symbol: model.health.symbol, text: model.menuBarText))
-            .accessibilityLabel("algobuddy: \(model.health.label)")
+        // VoiceOver reads the image's description: the status item passes no
+        // accessibility label on to its button.
+        Image(
+            nsImage: MenuBarImage.render(
+                symbol: model.health.symbol, text: model.menuBarText,
+                description: MenuBar.spokenName(health: model.health, text: model.menuBarFigures)))
     }
 }

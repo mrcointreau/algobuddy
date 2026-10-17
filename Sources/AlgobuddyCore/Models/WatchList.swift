@@ -63,4 +63,17 @@ public enum WatchList {
         }
         return resolved
     }
+
+    /// The positions of the rows that `resolve` drops as repeats: those whose
+    /// account an earlier row already watches, by its text or by the account
+    /// it holds while half-typed.
+    public static func repeats(_ rows: [Row]) -> Set<Int> {
+        var seen = Set<AlgorandAddress>()
+        var found = Set<Int>()
+        for (index, row) in rows.enumerated() {
+            guard let address = row.watched else { continue }
+            if !seen.insert(address).inserted { found.insert(index) }
+        }
+        return found
+    }
 }

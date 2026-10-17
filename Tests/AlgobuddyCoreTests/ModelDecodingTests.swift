@@ -23,8 +23,8 @@ struct EndpointTests {
     }
 
     /// Testing `Endpoint.resolve` alone is not enough: it would keep passing if
-    /// a caller went back to building URLs by hand. These exercise the clients'
-    /// real request paths.
+    /// a caller built its URLs by hand. These exercise the clients' real
+    /// request paths.
     @Test("AlgodClient requests land under the base path")
     func clientHonoursPrefix() async throws {
         let stub = StubFetcher()

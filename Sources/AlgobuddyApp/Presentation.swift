@@ -1,6 +1,19 @@
 import AlgobuddyCore
 import SwiftUI
 
+/// SwiftUI's `State` property wrapper, under a name that no macro shares.
+///
+/// From the macOS 27 SDK on, `@State` also names a macro, and the attribute
+/// resolves to it. The macro's implementation ships with Xcode but not with
+/// the Command Line Tools, which are all the README asks for, so with them
+/// every `@State` fails to build. This name reaches the property wrapper
+/// instead, and `make lint` keeps `@State` out of the sources.
+///
+/// The wrapper evaluates an initial value each time its view is created,
+/// where the macro waits for the first, so an initial value here should stay
+/// cheap.
+typealias StateWrapper = State
+
 /// Overall state, derived from the worst alert currently holding.
 enum HealthLevel: Int, Comparable {
     case unknown, ok, warning, critical
@@ -248,7 +261,7 @@ extension AccountState {
 /// The hover highlight of a menu item, shared by every clickable row in the
 /// panel so they all answer the pointer the same way.
 struct RowHighlight: ViewModifier {
-    @State private var isHovering = false
+    @StateWrapper private var isHovering = false
     @Environment(\.isEnabled) private var isEnabled
 
     func body(content: Content) -> some View {

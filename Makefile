@@ -33,9 +33,15 @@ test:
 
 # Apple's swift-format ships with the Swift toolchain, so contributors need
 # nothing installed, which keeps the zero-dependency promise in Package.swift.
-# Style lives in .swift-format.
+# Style lives in .swift-format. A `@State` outside a comment fails too: from the
+# macOS 27 SDK on it names a macro that the Command Line Tools cannot expand,
+# so the app uses `StateWrapper`; see Presentation.swift.
 lint:
 	swift format lint --strict --recursive $(SWIFT_SOURCES)
+	@if grep -rnE --include='*.swift' '^[^/]*@State([^[:alnum:]_]|$$)' $(SWIFT_SOURCES); then \
+		echo "error: use @StateWrapper instead of @State; see Presentation.swift"; \
+		exit 1; \
+	fi
 
 format:
 	swift format --in-place --recursive $(SWIFT_SOURCES)

@@ -4,6 +4,8 @@
 
 Requires macOS 14+ and a Swift 6 toolchain (`xcode-select --install`).
 
+Xcode is not needed, and the code keeps it that way: declare SwiftUI state with `@StateWrapper` rather than `@State`, which from the macOS 27 SDK on names a macro that only Xcode can expand. `make lint` rejects `@State`.
+
 ```bash
 make check    # lint, build and tests, as CI runs them
 make install  # build and install to /Applications

@@ -3,7 +3,7 @@ import SwiftUI
 
 @main
 struct AlgobuddyApp: App {
-    @State private var model: AppModel
+    @StateWrapper private var model: AppModel
 
     /// Loading here rather than from a `.task` on the menu bar label matters:
     /// SwiftUI renders that label into the status item and does not reliably

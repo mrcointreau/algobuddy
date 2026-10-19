@@ -5,7 +5,7 @@ struct PanelView: View {
     @Bindable var model: AppModel
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     /// The content's own height, which the panel's window is kept at.
-    @State private var contentHeight: CGFloat = 0
+    @StateWrapper private var contentHeight: CGFloat = 0
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {

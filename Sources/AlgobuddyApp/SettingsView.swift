@@ -75,7 +75,7 @@ struct SettingsView: View {
     /// adjusted more than once, so the window opens where it was left.
     @AppStorage("settingsPane") private var pane = SettingsPane.general
     /// The tallest a pane can be, which the window measures on its screen.
-    @State private var paneHeightLimit = FitsScreenHeight.estimatedLimit
+    @StateWrapper private var paneHeightLimit = FitsScreenHeight.estimatedLimit
 
     var body: some View {
         TabView(selection: $pane) {

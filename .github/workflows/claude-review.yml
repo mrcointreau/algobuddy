@@ -200,7 +200,10 @@ jobs:
       # pull request's content. The sed patterns redact tokens the way the
       # action does for inline comments, since nothing else filters this text
       # before it becomes a public comment. The marker finds the comment of an
-      # earlier run, so each run edits it in place.
+      # earlier run, so each run edits it in place. With `pipefail`, a failed
+      # search for that comment fails the step instead of posting a second one.
+      # `sed -n 1p` reads the whole list to take the first match, where `head`
+      # could exit while jq still writes and so fail the step.
       - name: Post the summary
         env:
           GH_TOKEN: ${{ github.token }}
@@ -208,6 +211,7 @@ jobs:
           HEAD_SHA: ${{ steps.checkout.outputs.commit }}
           REVIEW: ${{ steps.review.outputs.structured_output }}
         run: |
+          set -o pipefail
           case "$(jq -r .verdict <<< "$REVIEW")" in
             approve) verdict='✅ Approve' ;;
             comment) verdict='🟡 Comment' ;;
@@ -224,7 +228,7 @@ jobs:
             "$marker" "$verdict" "$summary" "${HEAD_SHA:0:7}" "$run_url")
           comments="repos/$GITHUB_REPOSITORY/issues/$PR/comments"
           id=$(gh api --paginate "$comments" | jq -r --arg marker "$marker" \
-            '.[] | select(.user.login == "github-actions[bot]" and (.body | startswith($marker))) | .id' | head -n 1)
+            '.[] | select(.user.login == "github-actions[bot]" and (.body | startswith($marker))) | .id' | sed -n 1p)
           if [ -n "$id" ]; then
             gh api --method PATCH "repos/$GITHUB_REPOSITORY/issues/comments/$id" -f body="$body" > /dev/null
           else

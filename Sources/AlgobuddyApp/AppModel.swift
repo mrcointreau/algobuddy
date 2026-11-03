@@ -43,10 +43,11 @@ final class AppModel {
     /// row watches nothing, which is how "no account" is expressed.
     var addressDrafts = [AddressDraft()]
 
-    /// Replaces the account's address, its ALGO figures and its keys' last
-    /// valid round, which names one key registration and so the account, with
-    /// bullets in the panel and the menu bar, for screen sharing, screenshots,
-    /// or simply not wanting a balance on display all day.
+    /// Replaces with bullets, in the panel and the menu bar, the account's
+    /// address, its ALGO figures and every other figure that gives the account
+    /// or its stake away: the block counts, the countdowns, the time since the
+    /// last proposal and the keys' last valid round. For screen sharing,
+    /// screenshots, or simply not wanting a balance on display all day.
     ///
     /// This hides values from onlookers and nothing more. It is not a security
     /// control, and there is nothing here to secure: the address is public
@@ -223,10 +224,10 @@ final class AppModel {
     /// What VoiceOver calls the menu bar item.
     var menuBarName: String { menuBar.spokenName(health: health.label) }
 
-    /// How wide the mask over the earnings is drawn: as wide as the figure it
-    /// hides, or as that figure's stand-in, so hiding values moves neither the
-    /// item nor the panel that hangs from it.
-    var menuBarMaskWidth: CGFloat? { menuBar.textUnderMask.map(MenuBarImage.width(of:)) }
+    /// How wide each mask over a figure is drawn, in display order: as wide as
+    /// the figure it hides, or as that figure's stand-in, so hiding values
+    /// moves neither the item nor the panel that hangs from it.
+    var menuBarMaskWidths: [CGFloat] { menuBar.textsUnderMasks.map(MenuBarImage.width(of:)) }
 
     private var menuBar: MenuBarText {
         MenuBarText(

@@ -97,29 +97,43 @@ struct MenuBarTextTests {
         }
     }
 
-    @Test("hiding values masks the earnings, figure or stand-in, and nothing else")
-    func hidingMasksEarnings() {
+    /// The round is the chain's own. Every other figure gives an account
+    /// away, so a mask hides it, and keeps only a unit that says nothing of
+    /// its size.
+    @Test("hiding values masks every figure but the round, figure or stand-in")
+    func hidingMasksFigures() throws {
         let text = Self.text(hidden: true)
-        #expect(text.text == "#64.03M · 3.5d · 87.0d · 3 blk · •••• \(Self.algo)")
+        #expect(text.text == "#64.03M · •••• · •••• · •• blk · •••• \(Self.algo)")
         #expect(
             text.spokenName(health: "Healthy")
-                == "algobuddy: Healthy, #64.03M, 3.5d, 87.0d, 3 blk, •••• ALGO")
+                == "algobuddy: Healthy, #64.03M, ••••, ••••, •• blk, •••• ALGO")
+        let round = try Self.shape("#66.04M")
         #expect(
-            Self.text([.earned24h], portfolio: nil, hidden: true).text == "•••• \(Self.algo)")
+            Self.text(round: nil, portfolio: nil, hidden: true).text
+                == "\(round) · •••• · •••• · •• blk · •••• \(Self.algo)")
+        // A word in place of a figure is masked as well.
+        #expect(
+            Self.text([.absenceHeadroom], portfolio: Self.portfolio(headroom: -60), hidden: true)
+                .text == "••••")
     }
 
-    /// The app draws the mask as wide as this, so hiding values moves neither
+    /// The app draws each mask as wide as this, so hiding values moves neither
     /// the item nor the panel that hangs from it.
-    @Test("under the mask is the figure it hides, or that figure's stand-in")
-    func textUnderMask() throws {
-        #expect(Self.text(hidden: true).textUnderMask == "8.2")
-        #expect(Self.text(portfolio: nil, hidden: true).textUnderMask == (try Self.shape("8.2")))
+    @Test("under each mask is the figure it hides, or that figure's stand-in")
+    func textsUnderMasks() throws {
+        #expect(Self.text(hidden: true).textsUnderMasks == ["3.5d", "87.0d", "3", "8.2"])
+        #expect(
+            Self.text(portfolio: nil, hidden: true).textsUnderMasks
+                == (try ["9.8d", "87.1d", "3", "8.2"].map(Self.shape)))
         let shapes = MenuBarShapes(stored: ["earned24h": try Self.shape("12.3 \(Self.algo)")])
         #expect(
-            Self.text(portfolio: nil, hidden: true, shapes: shapes).textUnderMask
-                == (try Self.shape("12.3")))
-        #expect(Self.text().textUnderMask == nil)
-        #expect(Self.text([.round], hidden: true).textUnderMask == nil)
+            Self.text([.earned24h], portfolio: nil, hidden: true, shapes: shapes).textsUnderMasks
+                == [try Self.shape("12.3")])
+        #expect(
+            Self.text([.absenceHeadroom], portfolio: Self.portfolio(headroom: -60), hidden: true)
+                .textsUnderMasks == ["overdue"])
+        #expect(Self.text().textsUnderMasks.isEmpty)
+        #expect(Self.text([.round], hidden: true).textsUnderMasks.isEmpty)
     }
 
     /// VoiceOver would read the text's letter for ALGO as a letter and a
@@ -175,11 +189,14 @@ struct MenuBarTextTests {
             "absenceHeadroom": try Self.shape("12.5d"),
             "earned24h": try Self.shape("12.3 \(Self.algo)"),
         ])
-        let text = Self.text(
-            [.absenceHeadroom, .earned24h], portfolio: Self.portfolio(headroom: -60),
-            hidden: true, shapes: last)
-        #expect(text.text == "overdue · •••• \(Self.algo)")
-        #expect(text.rememberedShapes == last)
+        let overdue = Self.text(
+            [.absenceHeadroom, .earned24h], portfolio: Self.portfolio(headroom: -60), shapes: last)
+        #expect(overdue.text == "overdue · 8.2 \(Self.algo)")
+        #expect(
+            overdue.rememberedShapes.stored["absenceHeadroom"] == last.stored["absenceHeadroom"])
+        let masked = Self.text([.absenceHeadroom, .earned24h], hidden: true, shapes: last)
+        #expect(masked.text == "•••• · •••• \(Self.algo)")
+        #expect(masked.rememberedShapes == last)
     }
 
     /// What storage hands back goes into the menu bar as it is.

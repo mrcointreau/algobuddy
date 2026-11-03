@@ -35,6 +35,14 @@ public enum Format {
         hidden ? Self.hidden() : address(value)
     }
 
+    /// A count with its unit, "3 blocks", or its mask, on the same terms as
+    /// `algosLabel`. A count of proposals follows the account's share of
+    /// online stake, so it gives the stake away nearly as plainly as the
+    /// balance does.
+    public static func countLabel(_ count: Int, _ unit: String, hidden: Bool) -> String {
+        hidden ? "\(Self.hidden()) \(unit)s" : quantity(Double(count), unit)
+    }
+
     /// What an account goes by: the name the user gave it, otherwise its short
     /// address or that address's mask. A name is never masked. It is the
     /// user's own label, and what tells the accounts apart while their

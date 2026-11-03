@@ -828,7 +828,7 @@ struct MenuBarMetricPicker: View {
         let name = model.menuBarName
         let item = MenuBarImage.render(
             symbol: model.health.symbol, text: model.menuBarText,
-            maskWidth: model.menuBarMaskWidth, description: name)
+            maskWidths: model.menuBarMaskWidths, description: name)
         let width = MenuBar.width(of: item)
         let isWide = width > MenuBar.comfortableWidth
 

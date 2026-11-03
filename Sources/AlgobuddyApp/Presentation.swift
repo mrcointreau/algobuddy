@@ -95,8 +95,8 @@ enum Spacing {
     static let edge: CGFloat = 14
 }
 
-/// Whether the panel masks the addresses, the ALGO amounts and the keys' last
-/// valid round.
+/// Whether the panel masks the addresses, the ALGO amounts and every other
+/// figure that gives an account away. See `AppModel.valuesHidden`.
 ///
 /// An environment value rather than a parameter threaded into each card: a
 /// default-false parameter makes omission compile silently, so a new card that

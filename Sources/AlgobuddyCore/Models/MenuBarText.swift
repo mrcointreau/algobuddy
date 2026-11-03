@@ -41,10 +41,26 @@ public struct MenuBarText: Sendable {
     /// several facts together on one line.
     public static let separator = " · "
 
+    /// What a metric shows while values are hidden, or nil for the round,
+    /// which is the chain's own and the same for every account. Every other
+    /// figure gives an account away: the earnings and the proposal count
+    /// follow its stake, the absence allowance the headroom is spent from is
+    /// set by it, and the key countdown, read against today's round, puts the
+    /// key registration within a few thousand rounds. A mask keeps a unit
+    /// that says nothing of the size of the figure, and drops the "d", "h" or
+    /// "m" of a countdown, which do.
+    ///
     /// Masked rather than dropped: removing the segment would shrink the item
     /// and shove every icon to its left along. The app sets the bullets as
-    /// wide as the figure they hide; see `textUnderMask`.
-    static let maskedEarned = "\(Format.hidden(4)) \(algo)"
+    /// wide as the figure they hide; see `textsUnderMasks`.
+    static func mask(_ metric: MenuBarMetric) -> String? {
+        switch metric {
+        case .round: nil
+        case .absenceHeadroom, .keyExpiry: Format.hidden(4)
+        case .proposals24h: "\(Format.hidden(2)) blk"
+        case .earned24h: "\(Format.hidden(4)) \(algo)"
+        }
+    }
 
     let metrics: Set<MenuBarMetric>
     let round: UInt64?
@@ -58,7 +74,7 @@ public struct MenuBarText: Sendable {
     ///     none.
     ///   - portfolio: What the accounts on display amount to, or nil while
     ///     there are none.
-    ///   - valuesHidden: Whether the earnings are masked.
+    ///   - valuesHidden: Whether the figures are masked.
     ///   - shapes: The remembered shapes, for the stand-ins.
     public init(
         metrics: Set<MenuBarMetric>, round: UInt64?, portfolio: PortfolioSummary?,
@@ -88,16 +104,20 @@ public struct MenuBarText: Sendable {
         return (["algobuddy: \(health)"] + figures).joined(separator: ", ")
     }
 
-    /// The text under the mask over the earnings, without the unit, which
-    /// stays in view: the figure, or while there is none, its stand-in. For
+    /// The text under each mask, in display order, without the unit the mask
+    /// keeps in view: the figure, or while there is none, its stand-in. For
     /// measuring only, since it is the very figure the mask hides: the app
-    /// draws the mask as wide, so hiding values moves neither the item nor the
-    /// panel that hangs from it. Nil unless values are hidden and the earnings
-    /// are selected.
-    public var textUnderMask: String? {
-        guard valuesHidden, metrics.contains(.earned24h) else { return nil }
-        let hidden = unmaskedFigure(.earned24h) ?? shapes.shape(for: .earned24h)
-        return hidden.replacingOccurrences(of: " \(Self.algo)", with: "")
+    /// draws each mask as wide, so hiding values moves neither the item nor
+    /// the panel that hangs from it. Empty unless values are hidden.
+    public var textsUnderMasks: [String] {
+        guard valuesHidden else { return [] }
+        return selected.compactMap { metric in
+            guard let mask = Self.mask(metric) else { return nil }
+            let hidden = unmaskedFigure(metric) ?? shapes.shape(for: metric)
+            let unit = String(mask.drop { $0 == "•" })
+            return unit.isEmpty || !hidden.hasSuffix(unit)
+                ? hidden : String(hidden.dropLast(unit.count))
+        }
     }
 
     /// `shapes`, with the shape of each figure shown in place of its metric's
@@ -121,8 +141,8 @@ public struct MenuBarText: Sendable {
     /// A metric's figure from the data on display, masked while values are
     /// hidden, or nil while it has none.
     private func figure(_ metric: MenuBarMetric) -> String? {
-        guard metric == .earned24h, valuesHidden else { return unmaskedFigure(metric) }
-        return unmaskedFigure(metric).map { _ in Self.maskedEarned }
+        guard valuesHidden, let mask = Self.mask(metric) else { return unmaskedFigure(metric) }
+        return unmaskedFigure(metric).map { _ in mask }
     }
 
     /// A metric's figure as it reads with values shown, or nil while it has
@@ -151,7 +171,7 @@ public struct MenuBarText: Sendable {
     /// What a metric shows while it has no figure.
     private func standIn(_ metric: MenuBarMetric) -> String {
         // The mask hides any figure, so it stands in for one as well.
-        if metric == .earned24h, valuesHidden { return Self.maskedEarned }
+        if valuesHidden, let mask = Self.mask(metric) { return mask }
         return shapes.shape(for: metric)
     }
 }

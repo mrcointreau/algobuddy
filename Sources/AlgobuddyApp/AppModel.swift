@@ -43,10 +43,13 @@ final class AppModel {
     /// row watches nothing, which is how "no account" is expressed.
     var addressDrafts = [AddressDraft()]
 
-    /// Replaces the account's address, its ALGO figures and its keys' last
-    /// valid round, which names one key registration and so the account, with
-    /// bullets in the panel and the menu bar, for screen sharing, screenshots,
-    /// or simply not wanting a balance on display all day.
+    /// Replaces with bullets, in the panel and the menu bar, the account's
+    /// address, its ALGO figures and every other figure that gives the account
+    /// or its stake away: the block counts, the countdowns, the time since the
+    /// last proposal and the keys' last valid round, in the cards and in the
+    /// alert texts and notifications alike. For screen sharing, screenshots,
+    /// or simply not wanting a balance on display all day. A notification
+    /// already on screen keeps the text it was posted with.
     ///
     /// This hides values from onlookers and nothing more. It is not a security
     /// control, and there is nothing here to secure: the address is public
@@ -223,10 +226,10 @@ final class AppModel {
     /// What VoiceOver calls the menu bar item.
     var menuBarName: String { menuBar.spokenName(health: health.label) }
 
-    /// How wide the mask over the earnings is drawn: as wide as the figure it
-    /// hides, or as that figure's stand-in, so hiding values moves neither the
-    /// item nor the panel that hangs from it.
-    var menuBarMaskWidth: CGFloat? { menuBar.textUnderMask.map(MenuBarImage.width(of:)) }
+    /// How wide each mask over a figure is drawn, in display order: as wide as
+    /// the figure it hides, or as that figure's stand-in, so hiding values
+    /// moves neither the item nor the panel that hangs from it.
+    var menuBarMaskWidths: [CGFloat] { menuBar.textsUnderMasks.map(MenuBarImage.width(of:)) }
 
     private var menuBar: MenuBarText {
         MenuBarText(
@@ -931,11 +934,12 @@ final class AppModel {
         guard canNotify else { return }
         let content = UNMutableNotificationContent()
         content.title = alert.title
-        content.body = alert.body
+        // Masked like every other surface, the body's figures and the account
+        // below alike, because a banner is on screen during exactly the screen
+        // share the mask is for.
+        content.body = alert.body(hidden: valuesHidden)
         // Which account this holds for. Only past one watched account: with a
         // single one the banner would name the only thing it could be about.
-        // Named and masked like every other surface, because a banner is on
-        // screen during exactly the screen share the mask is for.
         if accountCount > 1, let address = alert.address {
             content.subtitle = Format.accountLabel(
                 address, names: accountNames, hidden: valuesHidden)

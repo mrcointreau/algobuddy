@@ -274,7 +274,7 @@ struct PanelView: View {
             // row will do next, not what the current state is. Sits beside
             // Refresh because both change what the app is showing right now,
             // while Settings opens a window elsewhere. The masking reaches the
-            // menu bar's earned figure as well as the panel.
+            // menu bar's figures as well as the panel.
             MenuRow(
                 title: model.valuesHidden ? "Show values" : "Hide values",
                 symbol: model.valuesHidden ? "eye" : "eye.slash",
@@ -581,9 +581,15 @@ struct AccountCard: View {
             }
 
             if let expiry = entry.keyExpiry {
+                // The countdown is masked with the caption: read against
+                // today's round, it puts the key registration within a few
+                // thousand rounds. The bar stays, since a share of the key
+                // window alone points at no registration.
                 MeterRow(
                     title: "Participation keys",
-                    detail: Format.duration(expiry.timeRemaining(roundTime: update.roundTime)),
+                    detail: isHidden
+                        ? Format.hidden()
+                        : Format.duration(expiry.timeRemaining(roundTime: update.roundTime)),
                     // `MeterRow` clamps the fraction and guards non-finite
                     // values itself, so a zero-length window degrades to an
                     // empty bar.
@@ -598,16 +604,24 @@ struct AccountCard: View {
                         + (isHidden ? Format.hidden() : Format.exactRound(expiry.lastValid)))
             }
 
-            ValueRow(title: "Last proposed", detail: lastProposedText)
+            // Masked because, read against today's round, the time since the
+            // last proposal narrows down the blocks it can be, to a few dozen
+            // within the hour, and so the accounts that proposed them.
+            ValueRow(
+                title: "Last proposed", detail: isHidden ? Format.hidden() : lastProposedText)
 
             // Only once a quarter of the allowance is spent: a healthy account
             // stays well below that, and its headroom stated every poll would
             // be noise. The poller derives absence only for Online accounts, so
-            // no status check is needed here.
+            // no status check is needed here. Masked because the allowance it
+            // is spent from is set by the account's stake; its tint still
+            // grades it.
             if let absence = entry.absence, absence.ratio > 0.25 {
                 ValueRow(
                     title: "Absence headroom",
-                    detail: Format.duration(absence.headroom(roundTime: update.roundTime)),
+                    detail: isHidden
+                        ? Format.hidden()
+                        : Format.duration(absence.headroom(roundTime: update.roundTime)),
                     level: level(for: .absenceHeadroom))
             }
 
@@ -643,6 +657,7 @@ struct AccountCard: View {
 struct RewardsCard: View {
     /// Nil while the proposals are on their way.
     let rewards: RewardsSummary?
+    @Environment(\.valuesHidden) private var isHidden
 
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.heading) {
@@ -654,8 +669,10 @@ struct RewardsCard: View {
                 proposals7d: rewards?.proposals7d, earned7d: rewards?.earned7d)
 
             if let rewards, rewards.unpaidProposals > 0 {
-                Text("\(quantity(Double(rewards.unpaidProposals), "proposal")) earned nothing")
-                    .font(Typography.secondary).foregroundStyle(.orange)
+                Text(
+                    "\(Format.countLabel(rewards.unpaidProposals, "proposal", hidden: isHidden)) earned nothing"
+                )
+                .font(Typography.secondary).foregroundStyle(.orange)
             }
             if rewards?.isTruncated == true {
                 TruncationNote()
@@ -678,10 +695,8 @@ struct ProposalsGrid: View {
     var earned24h: MicroAlgos?
     var proposals7d: Int?
     var earned7d: MicroAlgos?
-    /// Only the ALGO amounts are masked. Masking the block counts too would
-    /// leave the rows with nothing to read, and a proposal count still tracks
-    /// the account's share of online stake, so this is a screen-sharing
-    /// convenience rather than concealment.
+    /// The block counts are masked with the amounts: a proposal count tracks
+    /// the account's share of online stake. See `Format.countLabel`.
     @Environment(\.valuesHidden) private var isHidden
 
     var body: some View {
@@ -701,7 +716,7 @@ struct ProposalsGrid: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
 
             // Singular matters: "1 blocks" reads as unfinished.
-            Text(blocks.map { quantity(Double($0), "block") } ?? "–")
+            Text(blocks.map { Format.countLabel($0, "block", hidden: isHidden) } ?? "–")
                 .font(Typography.primary.monospacedDigit())
                 .gridColumnAlignment(.trailing)
 
@@ -801,7 +816,7 @@ struct AlertsCard: View {
                             .accessibilityHidden(true)
                     }
                 }
-                Text(alert.body)
+                Text(alert.body(hidden: isHidden))
                     .font(Typography.secondary).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -974,9 +989,13 @@ struct AccountRow: View {
         return "as of \(Format.relative(now.timeIntervalSince(fetchedAt)))"
     }
 
+    /// Masked on the terms of the account card's key countdown.
     private var keysText: String? {
         entry.keyExpiry.map {
-            "keys \(Format.duration($0.timeRemaining(roundTime: update.roundTime)))"
+            "keys "
+                + (isHidden
+                    ? Format.hidden()
+                    : Format.duration($0.timeRemaining(roundTime: update.roundTime)))
         }
     }
 

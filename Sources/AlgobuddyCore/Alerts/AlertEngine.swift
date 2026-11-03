@@ -92,27 +92,89 @@ public struct AlertKey: Hashable, Sendable {
     }
 }
 
+/// An alert's body, written once and read two ways: as it is, and with each
+/// figure about the account masked, for while values are hidden.
+///
+/// A rule marks such a figure where it writes it, `\(figure: text)`, so what
+/// to mask is stated in the same place as the figure. A plain interpolation
+/// reads the same both ways, for a figure that says nothing of the account: a
+/// protocol parameter, a deadline every challenged account shares, or how
+/// long the data source has been silent.
+public struct AlertText: ExpressibleByStringInterpolation, Sendable, Equatable {
+    public let shown: String
+    public let hidden: String
+
+    public init(stringLiteral value: String) {
+        shown = value
+        hidden = value
+    }
+
+    public init(stringInterpolation: StringInterpolation) {
+        shown = stringInterpolation.shown
+        hidden = stringInterpolation.hidden
+    }
+
+    private init(shown: String, hidden: String) {
+        self.shown = shown
+        self.hidden = hidden
+    }
+
+    public static func + (lhs: AlertText, rhs: AlertText) -> AlertText {
+        AlertText(shown: lhs.shown + rhs.shown, hidden: lhs.hidden + rhs.hidden)
+    }
+
+    public struct StringInterpolation: StringInterpolationProtocol {
+        var shown = ""
+        var hidden = ""
+
+        public init(literalCapacity: Int, interpolationCount: Int) {}
+
+        public mutating func appendLiteral(_ literal: String) {
+            shown += literal
+            hidden += literal
+        }
+
+        public mutating func appendInterpolation(_ value: some Any) {
+            appendLiteral("\(value)")
+        }
+
+        /// A figure about the account, masked in the hidden reading.
+        public mutating func appendInterpolation(figure value: String) {
+            shown += value
+            hidden += Format.hidden()
+        }
+    }
+}
+
 public struct HealthAlert: Sendable, Equatable, Identifiable {
     public let id: AlertID
     /// The account the alert holds for, nil when it is about the watch itself.
     public let address: AlgorandAddress?
     public let severity: AlertSeverity
     public let title: String
-    public let body: String
+    public let text: AlertText
 
     public init(
         id: AlertID,
         address: AlgorandAddress? = nil,
         severity: AlertSeverity,
         title: String,
-        body: String
+        body: AlertText
     ) {
         self.id = id
         self.address = address
         self.severity = severity
         self.title = title
-        self.body = body
+        self.text = body
     }
+
+    /// The body as it is.
+    public var body: String { text.shown }
+
+    /// The body, or while values are hidden, the body with each figure about
+    /// the account masked. A title states only the condition, so it has no
+    /// figure to mask.
+    public func body(hidden: Bool) -> String { hidden ? text.hidden : text.shown }
 
     public var key: AlertKey { AlertKey(address: address, id: id) }
 
@@ -120,7 +182,7 @@ public struct HealthAlert: Sendable, Equatable, Identifiable {
     /// thresholds alone, so the account is attached once on the way out rather
     /// than repeated at every construction site.
     func held(for address: AlgorandAddress?) -> HealthAlert {
-        HealthAlert(id: id, address: address, severity: severity, title: title, body: body)
+        HealthAlert(id: id, address: address, severity: severity, title: title, body: text)
     }
 }
 
@@ -230,6 +292,8 @@ public struct AlertEngine: Sendable {
         guard snapshot.account?.status != .notParticipating else { return [] }
 
         if let challenge = snapshot.challenge, challenge.isFailing {
+            // Every account challenged in this interval shares the deadline,
+            // so its minutes are not a figure about the account.
             let seconds = challenge.timeUntilDeadline(roundTime: snapshot.roundTime)
             let remaining = UInt64(max(0, challenge.roundsUntilDeadline))
 
@@ -271,7 +335,7 @@ public struct AlertEngine: Sendable {
                         id: .absenceHeadroom, severity: .critical,
                         title: "Absence limit near",
                         body:
-                            "The account can be suspended in about \(headroomText). Check the node is proposing."
+                            "The account can be suspended in about \(figure: headroomText). Check the node is proposing."
                     ))
             } else if absence.ratio >= thresholds.absenceWarningRatio {
                 alerts.append(
@@ -279,7 +343,7 @@ public struct AlertEngine: Sendable {
                         id: .absenceHeadroom, severity: .warning,
                         title: "Absence headroom low",
                         body:
-                            "The account can be suspended in about \(headroomText). Check the node is proposing."
+                            "The account can be suspended in about \(figure: headroomText). Check the node is proposing."
                     ))
             }
         }
@@ -301,7 +365,7 @@ public struct AlertEngine: Sendable {
                         id: .keyExpiry, severity: .critical,
                         title: "Participation keys expiring",
                         body:
-                            "They expire in about \(duration(remaining)), after which the account stops participating. "
+                            "They expire in about \(figure: duration(remaining)), after which the account stops participating. "
                             + registrationAdvice(expiry, snapshot)
                     ))
             } else if days <= thresholds.keyExpiryWarningDays {
@@ -310,7 +374,7 @@ public struct AlertEngine: Sendable {
                         id: .keyExpiry, severity: .warning,
                         title: "Participation keys expiring",
                         body:
-                            "They expire in about \(quantity(days, "day")), after which the account stops participating. Generate new keys and register them."
+                            "They expire in about \(figure: quantity(days, "day")), after which the account stops participating. Generate new keys and register them."
                     ))
             }
         }
@@ -347,9 +411,9 @@ public struct AlertEngine: Sendable {
     /// lookback has passed since their registration, so keys registered too
     /// close to the end leave the account without keys for a while, and once
     /// fewer rounds remain than the lookback, that gap cannot be avoided.
-    private func registrationAdvice(_ expiry: KeyExpiry, _ snapshot: Snapshot) -> String {
+    private func registrationAdvice(_ expiry: KeyExpiry, _ snapshot: Snapshot) -> AlertText {
         let lookback = snapshot.params.balanceLookback
-        let effect =
+        let effect: AlertText =
             "New keys take effect \(lookback) rounds (about \(duration(Double(lookback) * snapshot.roundTime))) after they are registered"
         let remaining = UInt64(max(0, expiry.roundsRemaining))
         guard remaining < lookback else {
@@ -358,6 +422,6 @@ public struct AlertEngine: Sendable {
         }
         let gap = duration(Double(lookback - remaining) * snapshot.roundTime)
         return effect
-            + ", so generate and register them now: even then, the account has no keys in effect for about \(gap)."
+            + ", so generate and register them now: even then, the account has no keys in effect for about \(figure: gap)."
     }
 }

@@ -220,6 +220,90 @@ struct AlertEngineTests {
         #expect(alert?.title.contains("expired") == true)
     }
 
+    // MARK: - Hidden values
+
+    @Test("an alert text masks only the figures marked as the account's")
+    func alertText() {
+        let literal: AlertText = "Check the node is running."
+        #expect(literal.shown == "Check the node is running.")
+        #expect(literal.hidden == literal.shown)
+
+        let text: AlertText = "\(320) rounds, then about \(figure: "2 days")."
+        #expect(text.shown == "320 rounds, then about 2 days.")
+        #expect(text.hidden == "320 rounds, then about ••••••.")
+
+        let joined = text + " After \(figure: "5 hours")."
+        #expect(joined.shown == "320 rounds, then about 2 days. After 5 hours.")
+        #expect(joined.hidden == "320 rounds, then about ••••••. After ••••••.")
+    }
+
+    /// The headroom follows the account's stake and the key countdown points
+    /// at its registration, so neither may stand in the text while the card
+    /// beside it is masked.
+    @Test("hiding values masks the headroom and the key countdowns in the alert texts")
+    func hiddenBodiesMaskAccountFigures() {
+        let absence = AbsenceAssessment(
+            allowableLag: 10_000, roundsSinceLastSeen: 9_057, headroomRounds: 943,
+            ratio: 0.9057, isAbsent: false)
+        let near = engine.evaluate(Snapshot(absence: absence)).first { $0.id == .absenceHeadroom }
+        #expect(near?.body(hidden: false).contains("about 44 minutes") == true)
+        #expect(
+            near?.body(hidden: true)
+                == "The account can be suspended in about ••••••. Check the node is proposing.")
+
+        func keyAlert(roundsLeft: UInt64) -> HealthAlert? {
+            let expiry = KeyExpiry(
+                participation: .init(
+                    voteFirstValid: 0, voteLastValid: 1_000_000 + roundsLeft, voteKeyDilution: 1),
+                currentRound: 1_000_000)
+            return engine.evaluate(Snapshot(keyExpiry: expiry)).first { $0.id == .keyExpiry }
+        }
+        // Ten days left, a warning.
+        #expect(
+            keyAlert(roundsLeft: 308_571)?.body(hidden: true)
+                == "They expire in about ••••••, after which the account stops participating. Generate new keys and register them."
+        )
+        // 2.5 days left, critical. The lookback is the protocol's, so it stays.
+        let early = keyAlert(roundsLeft: 77_142)?.body(hidden: true)
+        #expect(early?.hasPrefix("They expire in about ••••••, after which") == true)
+        #expect(early?.contains("320 rounds (about 15 minutes)") == true)
+        #expect(early?.contains("2.5") == false)
+        // Fewer rounds left than the lookback: the gap without keys follows
+        // the countdown, so it is masked too.
+        let late = keyAlert(roundsLeft: 200)?.body(hidden: true)
+        #expect(late?.hasSuffix("no keys in effect for about ••••••.") == true)
+    }
+
+    /// A challenge's deadline is shared by every account challenged in the
+    /// same interval, and the rest are the protocol's figures or none at all.
+    @Test("an alert text without a figure about the account reads the same hidden")
+    func hiddenBodiesKeepSharedFigures() {
+        let alerts =
+            engine.evaluate(Snapshot(challenge: challenge(remaining: 20)))
+            + engine.evaluate(Snapshot(account: account(status: .offline)))
+            + engine.evaluate(Snapshot(account: account(amount: 1, eligible: false)))
+        #expect(
+            Set(alerts.map(\.id)) == [
+                .challengeFailing, .accountOffline, .notEarning, .balanceOutOfRange,
+            ])
+        for alert in alerts {
+            #expect(alert.body(hidden: true) == alert.body)
+        }
+    }
+
+    /// The engine attaches the account on the way out, and the hidden reading
+    /// has to survive that.
+    @Test("an alert held for an account keeps its hidden reading")
+    func heldAlertKeepsHiddenBody() throws {
+        let absence = AbsenceAssessment(
+            allowableLag: 10_000, roundsSinceLastSeen: 9_057, headroomRounds: 943,
+            ratio: 0.9057, isAbsent: false)
+        let alert = try #require(
+            engine.evaluate(Snapshot(address: watched.first, absence: absence)).first)
+        #expect(alert.address == watched.first)
+        #expect(alert.body(hidden: true).contains("••••••"))
+    }
+
     // MARK: - Eligibility
 
     @Test("online but not incentive-eligible warns")

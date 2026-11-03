@@ -46,13 +46,15 @@ public struct MenuBarText: Sendable {
     /// figure gives an account away: the earnings and the proposal count
     /// follow its stake, the absence allowance the headroom is spent from is
     /// set by it, and the key countdown, read against today's round, puts the
-    /// key registration within a few thousand rounds. A mask keeps a unit
-    /// that says nothing of the size of the figure, and drops the "d", "h" or
-    /// "m" of a countdown, which do.
+    /// key registration within a few thousand rounds. A mask keeps only a
+    /// unit that says nothing of the size of the figure, so a countdown's
+    /// mask drops its "d", "h" or "m".
     ///
     /// Masked rather than dropped: removing the segment would shrink the item
     /// and shove every icon to its left along. The app sets the bullets as
-    /// wide as the figure they hide; see `textsUnderMasks`.
+    /// wide as the figure they hide; see `textsUnderMasks`. So the number of
+    /// bullets still gives away roughly how long the figure is, such as how
+    /// many digits it has, which is the cost of an item that keeps its width.
     static func mask(_ metric: MenuBarMetric) -> String? {
         switch metric {
         case .round: nil

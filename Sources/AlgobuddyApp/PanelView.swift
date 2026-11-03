@@ -816,7 +816,7 @@ struct AlertsCard: View {
                             .accessibilityHidden(true)
                     }
                 }
-                Text(alert.body)
+                Text(alert.body(hidden: isHidden))
                     .font(Typography.secondary).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }

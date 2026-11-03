@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.5.0](https://github.com/mrcointreau/algobuddy/compare/v1.4.0...v1.5.0) (2026-11-03)
+
+
+### Features
+
+* mask every figure that gives an account away ([#49](https://github.com/mrcointreau/algobuddy/issues/49)) ([938f355](https://github.com/mrcointreau/algobuddy/commit/938f3559327469032cb2f035695dc5c41dae61c4))
+
 ## [1.4.0](https://github.com/mrcointreau/algobuddy/compare/v1.3.0...v1.4.0) (2026-10-17)
 
 

@@ -92,11 +92,28 @@ jobs:
           # pinned too, because each model has its own default level, and a
           # model change would otherwise alter the depth of every run.
           #
-          # Bash is off by default in this action. The make/swift allowances let
-          # the agent run its own `make check` before proposing a change, and
-          # the read-only git commands let it inspect its work; the action's
-          # own instructions tell it to use them. The pattern syntax follows
-          # the permission rules documented in the action's FAQ.
+          # The permission mode is pinned to `acceptEdits`, the strict mode the
+          # action documents for mention runs. In that mode the agent may edit
+          # files and run common filesystem commands such as `mkdir`, `mv` and
+          # `rm` in the checkout, and any other call that needs approval is
+          # denied unless an allow rule covers it, because the headless session
+          # has no one to ask. Without the pin the action starts the session in
+          # auto mode, where a call that needs approval and has no allow rule
+          # runs whenever a safety review passes it.
+          #
+          # The make/swift allowances let the agent run its own `make check`
+          # before proposing a change, and the read-only git commands let it
+          # inspect its work; the action's own instructions tell it to use them.
+          # The pattern syntax follows the permission rules documented in the
+          # action's FAQ.
+          #
+          # The list holds no file tools. The mode alone lets Edit and Write
+          # change files in the checkout, while an entry would let them write
+          # outside it too, which is why the action leaves them out of its own
+          # list. Read, Glob and Grep need no entry, because the action's own
+          # list holds them. The make/swift allowances run code from the
+          # checkout, which the agent can edit, so these rules guard against
+          # slips rather than contain a determined agent.
           #
           # The turn limit is a cost ceiling sized for feature work; a run that
           # hits it fails visibly rather than silently truncating.
@@ -104,4 +121,5 @@ jobs:
             --model claude-opus-5-5
             --effort high
             --max-turns 120
-            --allowedTools "Bash(make:*),Bash(swift:*),Bash(git status:*),Bash(git diff:*),Bash(git log:*),Edit,MultiEdit,Read,Write,Glob,Grep"
+            --permission-mode acceptEdits
+            --allowedTools "Bash(make:*),Bash(swift:*),Bash(git status:*),Bash(git diff:*),Bash(git log:*)"

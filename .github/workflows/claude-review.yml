@@ -181,17 +181,24 @@ jobs:
           # The model and effort are pinned for the reasons given in claude.yml.
           # `--tools` loads only the three built-in tools that read files, so
           # the shell, file edits, subagents, web access and every other tool
-          # are absent. The allow list holds only the comment tool and leaves
-          # out Read, Glob and Grep on purpose: unlisted, they reach only the
-          # checkout, while an entry would let them read anywhere on the runner,
-          # the tokens in the process environment included. The schema makes the
-          # final answer a verdict and a summary for the next step to post. The
-          # turn limit is a cost ceiling, and a run that hits it fails visibly.
+          # are absent. The permission mode is pinned to `default`, the strict
+          # mode the action documents for runs with a `prompt`: a call that
+          # needs approval is denied unless an allow rule covers it, because the
+          # headless session has no one to ask. The allow list holds only the
+          # comment tool and leaves out Read, Glob and Grep on purpose:
+          # unlisted, they reach only the checkout, while an entry would let
+          # them read anywhere on the runner, the tokens in the process
+          # environment included. Without the pin the action starts the session
+          # in auto mode, where Read, Glob and Grep reach files outside the
+          # checkout too. The schema makes the final answer a verdict and a
+          # summary for the next step to post. The turn limit is a cost ceiling,
+          # and a run that hits it fails visibly.
           claude_args: |
             --model claude-opus-5-5
             --effort high
             --max-turns 60
             --tools "Read,Glob,Grep"
+            --permission-mode default
             --allowedTools "mcp__github_inline_comment__create_inline_comment"
             --json-schema '{"type":"object","properties":{"verdict":{"type":"string","enum":["approve","comment","request_changes"]},"summary":{"type":"string"}},"required":["verdict","summary"],"additionalProperties":false}'
 

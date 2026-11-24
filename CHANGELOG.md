@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.5.1](https://github.com/mrcointreau/algobuddy/compare/v1.5.0...v1.5.1) (2026-11-24)
+
+
+### Bug Fixes
+
+* **build:** declare the SDK so macOS draws Liquid Glass ([#51](https://github.com/mrcointreau/algobuddy/issues/51)) ([3e92e0d](https://github.com/mrcointreau/algobuddy/commit/3e92e0d4a5f8bdf83d05906789ddd695e3fbe705))
+
 ## [1.5.0](https://github.com/mrcointreau/algobuddy/compare/v1.4.0...v1.5.0) (2026-11-03)
 
 

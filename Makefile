@@ -25,8 +25,20 @@ SWIFT_SOURCES := Sources Tests Tools
 
 all: bundle
 
+# The SDK the binary declares it was built with. macOS reads that version from
+# the binary and gives the app the design of that SDK, so a binary that declares
+# an SDK older than 26 gets no Liquid Glass, however new the system it runs on.
+# The linker driver learns the version from `-isysroot` or SDKROOT alone. When
+# the build system gives it neither, it records the deployment target in place
+# of the SDK version, and the app looks a generation old. Hence the explicit
+# path. An SDKROOT in the environment wins, as it does for the build itself.
+SDK := $(or $(SDKROOT),$(shell xcrun --sdk macosx --show-sdk-path 2>/dev/null))
+# Passed through the Swift driver, which runs the linker driver. Empty where
+# there is no SDK to name, which leaves the build to its own devices.
+SDK_FLAGS := $(if $(SDK),-Xswiftc -Xclang-linker -Xswiftc -isysroot -Xswiftc -Xclang-linker -Xswiftc "$(SDK)")
+
 build:
-	swift build -c $(CONFIG)
+	swift build -c $(CONFIG) $(SDK_FLAGS)
 
 test:
 	swift test
